@@ -1761,7 +1761,7 @@ var Pontoon = (function (my) {
         }
 
         // Enter: Save translation
-        if (key === 13 && !e.shiftKey && !e.altKey) {
+        if (key === 13 && e.ctrlKey ) {
           if ($('#leave-anyway').is(':visible')) {
             $('#leave-anyway').click();
           } else {
