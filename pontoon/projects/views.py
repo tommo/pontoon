@@ -1,6 +1,7 @@
 import logging
 import uuid
 
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
@@ -21,7 +22,7 @@ from pontoon.projects import forms
 
 log = logging.getLogger('pontoon')
 
-
+@login_required(redirect_field_name='', login_url='/403')
 def projects(request):
     """List all active projects."""
     projects = (

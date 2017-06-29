@@ -24,6 +24,7 @@ from pontoon.contributors.views import ContributorsMixin
 log = logging.getLogger('pontoon')
 
 
+@login_required(redirect_field_name='', login_url='/403')
 def teams(request):
     """List all active localization teams."""
     locales = (

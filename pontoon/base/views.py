@@ -53,7 +53,7 @@ from pontoon.base.utils import (
 
 log = logging.getLogger('pontoon')
 
-
+@login_required(redirect_field_name='', login_url='/403')
 def home(request):
     """Home view."""
     project = Project.objects.get(id=1)
@@ -94,7 +94,7 @@ def heroku_setup(request):
 
 # TRANSLATE VIEWs
 
-
+@login_required(redirect_field_name='', login_url='/403')
 def translate(request, locale, slug, part):
     """Translate view."""
     locale = get_object_or_404(Locale, code=locale)

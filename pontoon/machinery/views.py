@@ -3,6 +3,7 @@ import requests
 import urllib
 import xml.etree.ElementTree as ET
 
+from django.contrib.auth.decorators import login_required
 from collections import defaultdict
 from django.conf import settings
 from django.db import DataError
@@ -17,7 +18,7 @@ from pontoon.base.models import Locale, TranslationMemoryEntry
 
 log = logging.getLogger('pontoon')
 
-
+@login_required(redirect_field_name='', login_url='/403')
 def machinery(request):
     locale = utils.get_project_locale_from_request(
         request, Locale.objects) or 'en-GB'
