@@ -4,6 +4,7 @@ import logging
 from dateutil.relativedelta import relativedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.models import User
 from django.core.paginator import Paginator, EmptyPage
 from django.db import transaction
@@ -85,7 +86,7 @@ def contributor_timeline(request, username):
         'events': timeline_events
     })
 
-
+@login_required(redirect_field_name='', login_url='/403')
 def contributor(request, user):
     """Contributor profile."""
 
@@ -221,7 +222,7 @@ class ContributorsMixin(object):
         return context
 
 
-class ContributorsView(ContributorsMixin, TemplateView):
+class ContributorsView(LoginRequiredMixin, ContributorsMixin, TemplateView):
     """
     View returns top contributors.
     """
