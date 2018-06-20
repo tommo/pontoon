@@ -28,3 +28,13 @@ tmp/*
 docs/_build
 venv
 /media/
+.cache/
+coverage/
+
+# For docker
+.docker-build
+docker/config/webapp.env
+
+# Webpack
+/assets/
+webpack-stats.json

@@ -28,6 +28,11 @@ urlpatterns = [
         views.locale_projects,
         name='pontoon.locale.projects'),
 
+    # AJAX: Get locale stats used in All Resources part
+    url(r'^teams/(?P<locale>[A-Za-z0-9\-\@\.]+)/stats/$',
+        views.locale_stats,
+        name='pontoon.locale.stats'),
+
     # AJAX: Get locale-project pages/paths with stats
     url(r'^(?P<locale>[A-Za-z0-9\-\@\.]+)/(?P<slug>[\w-]+)/parts/$',
         views.locale_project_parts,
@@ -37,6 +42,11 @@ urlpatterns = [
     url(r'^(?P<locale>[A-Za-z0-9\-\@\.]+)/(?P<slug>[\w-]+)/(?P<part>.+)/authors-and-time-range/$',
         views.authors_and_time_range,
         name='pontoon.authors.and.time.range'),
+
+    # Locale-agnostic links
+    url(r'^projects/(?P<slug>[\w-]+)/(?P<part>.+)/$',
+        views.translate_locale_agnostic,
+        name='pontoon.translate.locale.agnostic'),
 
     # Translate project
     url(r'^(?P<locale>[A-Za-z0-9\-\@\.]+)/(?P<slug>[\w-]+)/(?P<part>.+)/$',
@@ -51,16 +61,18 @@ urlpatterns = [
     # AJAX
     url(r'^get-entities/', views.entities,
         name='pontoon.entities'),
-    url(r'^batch-edit-translations/', views.batch_edit_translations,
-        name='pontoon.batch.edit.translations'),
     url(r'^update/', views.update_translation,
         name='pontoon.update'),
+    url(r'^perform-checks/', views.perform_checks,
+        name='pontoon.perform.checks'),
     url(r'^get-history/', views.get_translation_history,
         name='pontoon.get_history'),
     url(r'^unapprove-translation/', views.unapprove_translation,
         name='pontoon.unapprove_translation'),
-    url(r'^delete-translation/', views.delete_translation,
-        name='pontoon.delete_translation'),
+    url(r'^reject-translation/', views.reject_translation,
+        name='pontoon.reject_translation'),
+    url(r'^unreject-translation/', views.unreject_translation,
+        name='pontoon.unreject_translation'),
     url(r'^other-locales/', views.get_translations_from_other_locales,
         name='pontoon.other_locales'),
     url(r'^download/', views.download,

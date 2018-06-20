@@ -42,9 +42,10 @@ var Pontoon = (function (my) {
        * Toggle request projects button
        */
       toggleButton: function (condition) {
-        var condition = condition || true,
-            show = condition && $('.projects td.check.enabled:visible').length > 0;
+        condition = condition || true;
+        var show = condition && $('.projects td.check.enabled:visible').length > 0;
 
+        $('#request-projects-note').toggle(show);
         $('#request-projects').toggle(show);
       },
 
@@ -62,8 +63,8 @@ var Pontoon = (function (my) {
             csrfmiddlewaretoken: $('#server').data('csrf'),
             projects: projects
           },
-          success: function(data) {
-            Pontoon.endLoader("New projects requested. We'll send you an email once they get enabled.", '', 5000);
+          success: function() {
+            Pontoon.endLoader("New projects request sent.", '', 5000);
           },
           error: function() {
             Pontoon.endLoader('Oops, something went wrong.', 'error');
@@ -119,7 +120,16 @@ $(function() {
           return $(element).siblings('.name').data('slug');
         }).get();
 
-    Pontoon.requestProjects.request(locale, projects);
+    if ($(this).is('.confirmed')) {
+      Pontoon.requestProjects.request(locale, projects);
+      $(this)
+        .removeClass('confirmed')
+        .html('Request new projects');
+    } else {
+      $(this)
+        .addClass('confirmed')
+        .html('Are you sure?');
+    }
   });
 
 });

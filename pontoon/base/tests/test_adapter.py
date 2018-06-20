@@ -1,61 +1,74 @@
-from mock import MagicMock, patch
+import pytest
+
+from mock import patch, MagicMock
 
 from allauth.socialaccount.models import SocialAccount, SocialLogin
 
-from pontoon.base.tests import BaseTestCase, UserFactory
-from django_nose.tools import assert_equal, assert_true, assert_false
 from pontoon.base.adapter import PontoonSocialAdapter
 
 
-class AdapterPreLoginTestCase(BaseTestCase):
+# We have to support customized adapter during the transition of accounts
+# between fxa and persona.
+
+def _get_sociallogin(user, provider):
     """
-    We have to support customized adapter during the transition of accounts between
-    fxa and persona.
+    Returns an ready sociallogin object for the given auth provider.
     """
-    def setUp(self):
-        self.log_mock = MagicMock()
-        self.user = UserFactory.create()
+    socialaccount = SocialAccount(
+        user=user,
+        uid='1234',
+        provider=provider,
+    )
+    socialaccount.extra_data = {'email': user.email}
+    sociallogin = SocialLogin()
+    sociallogin.account = socialaccount
+    return sociallogin
 
-        mock_messages = patch('pontoon.base.adapter.messages')
-        self.mock_messages = mock_messages.start()
-        self.addCleanup(mock_messages.stop)
 
-        self.adapter = PontoonSocialAdapter()
+@pytest.fixture
+def social_adapter0(request, user_a):
+    log_mock = MagicMock()
+    adapter = PontoonSocialAdapter()
+    sociallogin = _get_sociallogin(user_a, 'fxa')
+    mock_messages = patch('pontoon.base.adapter.messages')
+    mock_messages = mock_messages.start()
+    request.addfinalizer(mock_messages.stop)
+    return user_a, adapter, sociallogin, log_mock, mock_messages
 
-    def get_sociallogin(self, provider):
-        """
-        Returns an ready sociallogin object for the given auth provider.
-        """
-        self.sociallogin = SocialLogin()
-        self.socialaccount = SocialAccount(
-            user=self.user,
-            uid='1234',
-            provider=provider,
-        )
-        self.socialaccount.extra_data = {
-            'email': self.user.email,
-        }
-        self.sociallogin.account = self.socialaccount
-        return self.sociallogin
 
-    def test_connect_normal_auth_account(self):
-        self.log_mock.return_value = False
+@pytest.mark.django_db
+def test_adapter_base_get_connect_normal_auth_account(social_adapter0):
+    user, adapter, sociallogin, log_mock, mock_messages = social_adapter0
 
-        self.adapter.pre_social_login(MagicMock(), self.get_sociallogin('fxa'))
+    log_mock.return_value = False
+    adapter.pre_social_login(
+        MagicMock(),
+        sociallogin,
+    )
+    assert sociallogin.account.pk
+    assert sociallogin.user == user
 
-        assert_true(self.sociallogin.account.pk)
-        assert_equal(self.sociallogin.user, self.user)
 
-    def test_connect_existing_persona_account(self):
-        self.log_mock.side_effect = lambda provider: provider == 'persona'
+@pytest.mark.django_db
+def test_adapter_base_connect_existing_persona_account(social_adapter0):
+    user, adapter, sociallogin, log_mock, mock_messages = social_adapter0
 
-        self.adapter.pre_social_login(MagicMock, self.get_sociallogin('fxa'))
+    log_mock.side_effect = lambda provider: provider == 'persona'
+    adapter.pre_social_login(
+        MagicMock(),
+        sociallogin,
+    )
+    assert sociallogin.account.pk
+    assert sociallogin.user == user
 
-        assert_true(self.sociallogin.account.pk)
-        assert_equal(self.sociallogin.user, self.user)
 
-    def test_already_connected_accounts(self):
-        self.log_mock.return_value = True
+@pytest.mark.django_db
+def test_adapter_base_already_connected_accounts(social_adapter0):
+    user, adapter, sociallogin, log_mock, mock_messages = social_adapter0
 
-        self.adapter.pre_social_login(MagicMock, self.get_sociallogin('fxa'))
-        assert_false(self.mock_messages.called)
+    log_mock.return_value = True
+    adapter.pre_social_login(
+        MagicMock(),
+        sociallogin,
+    )
+    assert mock_messages.called is False

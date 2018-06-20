@@ -11,6 +11,7 @@ https://bitbucket.org/ogi/mozilla-l10n-po/
 """
 
 from __future__ import print_function
+from six import text_type
 
 import datetime
 import os
@@ -18,40 +19,31 @@ import shutil
 import subprocess
 
 TARGET_REPOS = {
-    'firefox': {
-        'folders': [
-            'browser', 'browser/branding/official',
-            'browser/extensions/onboarding',
-            'browser/extensions/pocket',
-            'browser/extensions/webcompat-reporter',
-            'devtools/client', 'devtools/shared',
-            'dom', 'netwerk', 'security/manager',
-            'services/sync', 'toolkit', 'webapprt',
-        ],
-        'source': 'mozilla',
-    },
-    'firefox-for-android': {
-        'folders': ['mobile', 'mobile/android', 'mobile/android/base'],
-        'source': 'mozilla',
-    },
-    'thunderbird': {
-        'folders': [
-            'chat', 'editor/ui', 'mail',
-            'other-licenses/branding/thunderbird'
-        ],
-        'source': 'comm',
-    },
-    'lightning': {
-        'folders': ['calendar'],
-        'source': 'comm',
-    },
-    'seamonkey': {
-        'folders': ['suite'],
-        'source': 'comm',
-    },
+    'firefox': [
+        'browser',
+        'devtools',
+        'dom',
+        'netwerk',
+        'security',
+        'services',
+        'toolkit',
+    ],
+    'firefox-for-android': [
+        'mobile',
+    ],
+    'thunderbird': [
+        'chat',
+        'editor',
+        'mail',
+        'other-licenses',
+    ],
+    'lightning': [
+        'calendar',
+    ],
+    'seamonkey': [
+        'suite',
+    ],
 }
-
-SOURCE_REPOS = set(v["source"] for v in TARGET_REPOS.values())
 
 
 def write(text):
@@ -85,14 +77,18 @@ def pull(url, target):
 
     # Clone
     else:
-        write(unicode(error))
+        write(text_type(error))
         write('Clone instead.')
+
+        # Clean up target directory on a failed pull, so that it's empty for a clone
+        command = ["rm", "-rf", target]
+        code, output, error = execute(command)
 
         code, output, error = execute(['hg', 'clone', url, target])
         if code == 0:
             write('Repository at ' + url + ' cloned.')
         else:
-            write(unicode(error))
+            write(text_type(error))
 
 
 def push(path):
@@ -102,59 +98,45 @@ def push(path):
     # Commit
     code, output, error = execute(['hg', 'commit', '-m', 'Update'], path)
     if code != 0 and len(error):
-        write(unicode(error))
+        write(text_type(error))
 
     # Push
     code, output, error = execute(['hg', 'push'], path)
     if code == 0:
         write('Repository at ' + path + ' pushed.')
     elif len(error):
-        write(unicode(error))
+        write(text_type(error))
 
 # Change working directory to where script is located
 abspath = os.path.abspath(__file__)
 dname = os.path.dirname(abspath)
 os.chdir(dname)
 
-for channel in ['beta', 'central']:
-    for repo in SOURCE_REPOS:
-        ending = repo + '-' + channel
+# Clone or update source repository
+url = 'https://hg.mozilla.org/l10n/gecko-strings/'
+target = 'source'
+pull(url, target)
 
-        url_folder = ''
-        if channel == 'central':
-            if repo == 'mozilla':
-                url_folder = 'l10n/'
-        else:
-            url_folder = 'releases/'
+for repo in TARGET_REPOS.keys():
+    ending = repo + '-central'
+    url = 'ssh://hg.mozilla.org/users/m_owca.info/' + ending
+    target = os.path.join('target', ending)
 
-        url = 'ssh://hg.mozilla.org/' + url_folder + ending
-        target = os.path.join('source', ending)
+    # Clone or update target repository
+    pull(url, target)
 
-        # Clone or update source repositories
-        pull(url, target)
+    # Prune all subdirectories in target repository in case they get removed from source
+    for subdir in os.listdir(target):
+        if not subdir.startswith('.'):
+            shutil.rmtree(os.path.join(target, subdir))
 
-    for repo in TARGET_REPOS.keys():
-        ending = repo + '-' + channel
-        url = 'ssh://hg.mozilla.org/users/m_owca.info/' + ending
-        target = os.path.join('target', ending)
+    # Copy folders from source to target
+    for folder in TARGET_REPOS[repo]:
+        origin = os.path.join('source', folder)
+        destination = os.path.join('target', ending, folder)
 
-        # Clone or update target repositories
-        pull(url, target)
+        if os.path.exists(origin):
+            shutil.copytree(origin, destination)
 
-        # Copy folders from source to target
-        folders = TARGET_REPOS[repo]['folders']
-        source = TARGET_REPOS[repo]['source'] + '-' + channel
-
-        for folder in folders:
-            origin = os.path.join('source', source, folder, 'locales/en-US')
-            destination = os.path.join('target', ending, folder)
-
-            if os.path.exists(destination):
-                shutil.rmtree(destination)
-
-            # Needed temporarily because devtools aren't moved in beta yet
-            if os.path.exists(origin):
-                shutil.copytree(origin, destination)
-
-        # Commit and push target repositories
-        push(target)
+    # Commit and push target repositories
+    push(target)

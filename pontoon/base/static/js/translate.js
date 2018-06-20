@@ -2,8 +2,6 @@
 var Pontoon = (function (my) {
 
   return $.extend(true, my, {
-    CLDR_PLURALS: ['zero', 'one', 'two', 'few', 'many', 'other'],
-
     /*
      * UI helper methods
      *
@@ -25,15 +23,23 @@ var Pontoon = (function (my) {
 
 
     renderEntity: function (index, entity) {
-      var self = this,
-          status = self.getEntityStatus(entity),
-          openSans = (['Latin', 'Greek', 'Cyrillic', 'Vietnamese'].indexOf(self.locale.script) > -1) ? ' open-sans' : '',
-          sourceString = (entity.original_plural && self.locale.nplurals < 2) ? entity.marked_plural : entity.marked,
-          translation = entity.translation[0],
-          translationString = translation.string || '';
+      var self = this;
+      var status = self.getEntityStatus(entity);
+      var translation = entity.translation[0];
+      var markPlaceables = true;
+      var openSans = (['Latin', 'Greek', 'Cyrillic', 'Vietnamese'].indexOf(self.locale.script) > -1) ? ' open-sans' : '';
 
-      sourceString = self.fluent.getSimplePreview(entity, sourceString, entity);
-      translationString = self.fluent.getSimplePreview(translation, translationString, entity);
+      var sourceString = self.fluent.getSimplePreview(
+        entity.original,
+        (entity.original_plural && self.locale.nplurals < 2) ? entity.marked_plural : entity.marked,
+        markPlaceables
+      );
+
+      var translationString = self.fluent.getSimplePreview(
+        translation.string,
+        self.markPlaceables(translation.string || ''),
+        markPlaceables
+      );
 
       var li = $('<li class="entity' +
         (' ' + status) +
@@ -45,7 +51,7 @@ var Pontoon = (function (my) {
         '<p class="string-wrapper">' +
           '<span class="source-string">' + sourceString + '</span>' +
           '<span class="translation-string' + openSans + '" dir="' + self.locale.direction + '" lang="' + self.locale.code + '" data-script="' + self.locale.script + '">' +
-            self.markPlaceables(translationString) +
+            translationString +
           '</span>' +
         '</p>' +
         '<span class="arrow fa fa-chevron-right fa-lg"></span>' +
@@ -120,11 +126,13 @@ var Pontoon = (function (my) {
     getOtherLocales: function (entity) {
       var self = this,
           list = $('#helpers .other-locales ul').empty(),
-          tab = $('#helpers a[href="#other-locales"]').addClass('loading'),
+          tab = $('#helpers a[href="#other-locales"]'),
           count = '',
           preferred = 0,
           remaining = 0,
           localesOrder = self.user.localesOrder;
+
+      self.NProgressUnbind();
 
       if (self.XHRgetOtherLocales) {
         self.XHRgetOtherLocales.abort();
@@ -139,7 +147,7 @@ var Pontoon = (function (my) {
         success: function(data) {
           if (data.length) {
             $.each(data, function() {
-              var translationString = self.fluent.getSimplePreview(this, this.string, entity),
+              var translationString = self.fluent.getSimplePreview(this.string),
               link = self.getResourceLink(
                     this.locale__code,
                     self.project.slug,
@@ -155,7 +163,7 @@ var Pontoon = (function (my) {
                   self.markPlaceables(translationString) +
                 '</p>' +
                 '<p class="translation-clipboard">' +
-                  self.doNotRender(translationString) +
+                  self.doNotRender(this.string) +
                 '</p>' +
               '</li>');
 
@@ -203,7 +211,7 @@ var Pontoon = (function (my) {
           }
         },
         complete: function() {
-          tab.removeClass('loading')
+          tab
             .find('.count')
               .find('.preferred').html(preferred).toggle(preferred > 0).end()
               .find('.plus').html('+').toggle(preferred > 0 && remaining > 0).end()
@@ -211,6 +219,8 @@ var Pontoon = (function (my) {
               .toggle(count !== '');
         }
       });
+
+      self.NProgressBind();
     },
 
 
@@ -229,8 +239,6 @@ var Pontoon = (function (my) {
 
 
     getApproveButtonTitle: function(translation) {
-      var approveButtonTitle = '';
-
       if (translation.approved && translation.approved_user) {
         return 'Approved by ' + translation.approved_user;
       } else {
@@ -252,8 +260,10 @@ var Pontoon = (function (my) {
     getHistory: function (entity) {
       var self = this,
           list = $('#helpers .history ul').empty(),
-          tab = $('#helpers a[href="#history"]').addClass('loading'),
+          tab = $('#helpers a[href="#history"]'),
           count = '';
+
+      self.NProgressUnbind();
 
       if (self.XHRgetHistory) {
         self.XHRgetHistory.abort();
@@ -269,12 +279,12 @@ var Pontoon = (function (my) {
         success: function(data) {
           if (data.length) {
             $.each(data, function(i) {
-              var baseString = self.fluent.getSimplePreview(this, data[0].string, entity);
-                  translationString = self.fluent.getSimplePreview(this, this.string, entity);
+              var baseString = self.fluent.getSimplePreview(data[0].string),
+                  translationString = self.fluent.getSimplePreview(this.string);
 
               list.append(
                 '<li data-id="' + this.pk + '" class="suggestion ' +
-                (this.approved ? 'translated' : this.fuzzy ? 'fuzzy' : 'suggested') +
+                (this.approved ? 'translated' : this.rejected ? 'rejected' : this.fuzzy ? 'fuzzy' : 'suggested') +
                 '" title="Copy Into Translation (Tab)">' +
                   '<header class="clearfix' +
                     ((self.user.canTranslate()) ? ' translator' :
@@ -284,13 +294,15 @@ var Pontoon = (function (my) {
                     '<div class="info">' +
                       ((!this.uid) ? '<span>' + this.user + '</span>' :
                         '<a href="/contributors/' + this.username + '" title="' + self.getApproveButtonTitle(this) + '">' + this.user + '</a>') +
-                      '<time class="stress" datetime="' + this.date_iso + '">' + this.date + ' UTC</time>' +
+                      '<time dir="ltr" class="stress" datetime="' + this.date_iso + '">' + this.date + ' UTC</time>' +
                     '</div>' +
                     '<menu class="toolbar">' +
                       ((i > 0) ? '<a href="#" class="toggle-diff" data-alternative-text="Hide diff" title="Show diff against the currently active translation">Show diff</a>' : '') +
                       '<button class="' + (this.approved ? 'unapprove' : 'approve') + ' fa" title="' +
                        (this.approved ? 'Unapprove' : 'Approve')  + '"></button>' +
-                      ((self.user.id && (self.user.id === this.uid) || self.user.canTranslate()) ? '<button class="delete fa" title="Delete"></button>' : '') +
+                      ((self.user.id && (self.user.id === this.uid) || self.user.canTranslate()) ? '<button class="' +
+                       (this.rejected ? 'unreject' : 'reject') + ' fa" title="' +
+                       (this.rejected ? 'Unreject' : 'Reject') + '"></button>' : '') +
                     '</menu>' +
                   '</header>' +
                   '<p class="translation" dir="' + self.locale.direction + '" lang="' + self.locale.code + '" data-script="' + self.locale.script + '">' +
@@ -300,12 +312,9 @@ var Pontoon = (function (my) {
                     ((i > 0) ? self.diff(baseString, translationString) : self.markPlaceables(translationString)) +
                   '</p>' +
                   '<p class="translation-clipboard">' +
-                    self.doNotRender(translationString) +
+                    self.doNotRender(this.string) +
                   '</p>' +
                 '</li>');
-
-              // Storing string value, needed for FTL
-              list.find('[data-id="' + this.pk + '"]')[0].string = this.string;
             });
 
             $("#helpers .history time").timeago();
@@ -321,10 +330,11 @@ var Pontoon = (function (my) {
           }
         },
         complete: function() {
-          tab.removeClass('loading')
-            .find('.count').html(count).toggle(count !== '');
+          tab.find('.count').html(count).toggle(count !== '');
         }
       });
+
+      self.NProgressBind();
     },
 
 
@@ -333,7 +343,7 @@ var Pontoon = (function (my) {
      */
     updateHelpers: function () {
       var entity = this.getEditorEntity(),
-          source = entity['original' + this.isPluralized()];
+          source = this.fluent.getSimplePreview(entity['original' + this.getPluralSuffix()]);
 
       this.getHistory(entity);
 
@@ -373,9 +383,9 @@ var Pontoon = (function (my) {
      */
     jumpToPart: function(part) {
       var self = this;
-
       self.checkUnsavedChanges(function() {
         $('.part .selector').attr('title', part);
+
         self.updateCurrentPart(part);
 
         // Reset optional state parameters and update state
@@ -409,17 +419,8 @@ var Pontoon = (function (my) {
      * Move cursor to the beginning of translation textarea
      */
     moveCursorToBeginning: function () {
-      var standard = $('#translation'),
-          ftl = $('#ftl-area input.value:visible:first'),
-          element = null;
-
-      if (standard.is(':visible')) {
-        element = standard;
-      } else if (ftl.is(':visible')) {
-        element = ftl;
-      }
-
-      if (element) {
+      var element = $('#editor textarea:visible:first');
+      if (element.length) {
         element[0].setSelectionRange(0, 0);
       }
     },
@@ -430,7 +431,7 @@ var Pontoon = (function (my) {
      */
     updateCurrentTranslationLength: function () {
       var limit = this.translationLengthLimit,
-          translation = $('#translation').val();
+          translation = $('#editor textarea:visible:first').val() || '';
 
       if (limit) {
         var length = this.stripHTML(translation).length,
@@ -451,7 +452,29 @@ var Pontoon = (function (my) {
      * Update cached translation, needed for unsaved changes check
      */
     updateCachedTranslation: function () {
-      this.cachedTranslation = $('#translation').val();
+      this.cachedTranslation = this.fluent.getFTLEditorContentsAsSource();
+    },
+
+
+    /*
+     * Update the standard translation editor and focus it
+     */
+    updateAndFocusTranslationEditor: function (translation) {
+      $('#editor textarea:visible:first').val(translation).focus();
+    },
+
+
+    /*
+     * Get focused translation textarea element or first, if none has focus
+     */
+    getFocusedOrFirstTextarea: function () {
+      var textarea = $('#editor textarea:visible:focus');
+
+      if (!textarea.length) {
+        textarea = $('#editor textarea:visible:first');
+      }
+
+      return textarea;
     },
 
 
@@ -477,20 +500,59 @@ var Pontoon = (function (my) {
 
 
     /*
+     * Get example number for each plural form based on locale plural rule
+     */
+    generateLocalePluralExamples: function () {
+      var self = this;
+      var nplurals = self.locale.nplurals;
+      var cldr_plurals = self.locale.cldr_plurals;
+
+      if (nplurals === 2) {
+        self.locale.plural_examples = {};
+        self.locale.plural_examples[cldr_plurals[0]] = 1;
+        self.locale.plural_examples[cldr_plurals[1]] = 2;
+
+      } else {
+        var examples = self.locale.plural_examples = {};
+
+        // Example candidate: n is a variable used in the eval()
+        var n = 0;
+
+        while (Object.keys(examples).length < nplurals) {
+          var rule = eval(self.locale.plural_rule);
+          if (!examples[cldr_plurals[rule]]) {
+            examples[cldr_plurals[rule]] = n;
+          }
+          n++;
+        }
+      }
+
+      // Update plural tabs
+      $.each(cldr_plurals, function(i) {
+        $('#plural-tabs li:eq(' + i + ') a')
+          .find('span').html(this).end()
+          .find('sup').html(self.locale.plural_examples[this]);
+      });
+    },
+
+
+    /*
      * Open translation editor in the main UI
      *
      * entity Entity
      */
     openEditor: function (entity) {
       var self = this;
-      self.translationLengthLimit = null;
 
       $('#editor')[0].entity = entity;
 
       // Metadata: comment
       $('#metadata').empty();
-      if (entity.comment) {
+      $('#source-pane').removeClass().find('#screenshots').empty();
 
+      self.translationLengthLimit = false;
+
+      if (entity.comment) {
         // Translation length limit
         var split = entity.comment.split('\n'),
             splitComment = entity.comment;
@@ -498,17 +560,15 @@ var Pontoon = (function (my) {
           try {
             self.translationLengthLimit = parseInt(split[0].split('MAX_LENGTH: ')[1].split(' ')[0], 10);
             splitComment = split.length > 1 ? entity.comment.substring(entity.comment.indexOf('\n') + 1) : '';
-          } catch (e) {} // Catch unexpected comment structure
+          } catch (e) {
+            // Catch unexpected comment structure
+          }
         }
 
         var comment = this.linkify(splitComment);
-        if (comment === splitComment) {
-          comment = this.doNotRender(splitComment);
-        }
         self.appendMetaData('Comment', comment);
 
         // Screenshot
-        $('#source-pane').removeClass().find('#screenshots').empty();
         $('#metadata').find('a').each(function() {
           var url = $(this).html();
           if (/(https?:\/\/.*\.(?:png|jpg))/im.test(url)) {
@@ -526,10 +586,23 @@ var Pontoon = (function (my) {
 
       // Metadata: source
       if (entity.source) {
-        if (typeof(entity.source) === 'object') {
+        // PO
+        if (Array.isArray(entity.source)) {
           $.each(entity.source, function() {
-            self.appendMetaData('#:', this.join(':'));
+            if (Array.isArray(this)) {
+              self.appendMetaData('#:', this.join(':'));
+            }
           });
+        // JSON
+        } else if (typeof(entity.source) === 'object') {
+          var examples = [];
+          $.each(Object.keys(entity.source), function() {
+            var example = entity.source[this].example;
+            if (example) {
+              examples.push('$' + this.toUpperCase() + '$: ' + example);
+            }
+          });
+          self.appendMetaData('Placeholder Examples', self.linkify(examples.join(', ')));
         } else {
           self.appendMetaData('Source', entity.source);
         }
@@ -541,18 +614,24 @@ var Pontoon = (function (my) {
             linkClass = null;
 
         // Resources can be mapped into multiple subpages.
-        if (!self.project.hasSubPages) {
+        if (!entity.project.url) {
           link = self.getResourceLink(
             self.locale.code,
-            self.project.slug,
+            entity.project.slug,
             entity.path
           );
 
-          linkClass = 'resource-path';
+          if (self.project.slug !== 'all-projects') {
+            linkClass = 'resource-path';
+          }
         }
 
-        self.appendMetaData('Resource path', entity.path, link, linkClass);
+        self.appendMetaData('Resource', entity.path, link, linkClass);
       }
+
+      // Metadata: project
+      var projectLink = '/' + self.locale.code + '/' +  entity.project.slug + '/';
+      self.appendMetaData('Project', entity.project.name, projectLink);
 
       // Original string and plurals
       $('#original').html(entity.marked);
@@ -564,31 +643,6 @@ var Pontoon = (function (my) {
 
         var nplurals = this.locale.nplurals;
         if (nplurals > 1) {
-
-          // Get example number for each plural form based on locale plural rule
-          if (!this.locale.examples) {
-            var examples = this.locale.examples = {},
-                n = 0;
-
-            if (nplurals === 2) {
-              examples = {0: 1, 1: 2};
-
-            } else {
-              while (Object.keys(examples).length < nplurals) {
-                var rule = eval(this.locale.plural_rule);
-                if (!examples[rule]) {
-                  examples[rule] = n;
-                }
-                n++;
-              }
-            }
-
-            $.each(this.locale.cldr_plurals, function(i) {
-              $('#plural-tabs li:eq(' + i + ') a')
-                .find('span').html(self.CLDR_PLURALS[this]).end()
-                .find('sup').html(examples[i]);
-            });
-          }
           $('#plural-tabs li:lt(' + nplurals + ')').css('display', 'table-cell');
           $('#plural-tabs li:first a').click();
 
@@ -604,8 +658,11 @@ var Pontoon = (function (my) {
       $('#translation').val(translation.string);
       $('.warning-overlay:visible .cancel').click();
 
+      self.updateSaveButtons();
+      self.updateMakeSuggestionToggle();
+
       // Length
-      var original = entity['original' + this.isPluralized()].length;
+      var original = entity['original' + this.getPluralSuffix()];
 
       // Toggle translation length display
       $('#translation-length')
@@ -613,10 +670,9 @@ var Pontoon = (function (my) {
         .find('.countdown').toggle(!!self.translationLengthLimit);
 
       // Need to show if sidebar opened by default
-      $('#translation-length').show().find('.original-length').html(original);
+      $('#translation-length').show().find('.original-length').html(original.length);
       self.moveCursorToBeginning();
       self.updateCurrentTranslationLength();
-      self.updateCachedTranslation();
 
       // Update entity list
       $("#entitylist .hovered").removeClass('hovered');
@@ -630,11 +686,16 @@ var Pontoon = (function (my) {
       }
 
       // FTL: Complex original string and translation
-      self.fluent.toggleOriginal();
-      self.fluent.toggleEditor(translation.isComplexFTL || (entity.isComplexFTL && !translation.pk));
-      // TODO: Uncomment once source view support is implemented
-      // self.fluent.toggleButton();
+      self.fluent.renderOriginal();
+      self.fluent.toggleEditor();
 
+      if (self.fluent.isFTLEditorEnabled()) {
+        self.fluent.renderEditor();
+      }
+
+      self.fluent.toggleButton();
+
+      self.updateCachedTranslation();
       self.updateHelpers();
       self.pushState();
     },
@@ -647,7 +708,9 @@ var Pontoon = (function (my) {
      */
     getEntityStatus: function (entity) {
       var translation = entity.translation,
-          translated = fuzzy = suggested = 0;
+          translated = 0,
+          fuzzy = 0,
+          suggested = 0;
 
       for (var i=0; i<translation.length; i++) {
         if (entity.translation[i].approved) {
@@ -689,11 +752,11 @@ var Pontoon = (function (my) {
       }
 
       var before = this.cachedTranslation,
-          after = $('#translation').val();
+          after = this.fluent.getFTLEditorContentsAsSource();
 
       if ((before !== null) && (before !== after)) {
         $('#unsaved').show();
-        $('#translation').focus();
+        $('#editor textarea:visible:first').focus();
         this.checkUnsavedChangesCallback = callback;
 
       } else {
@@ -758,6 +821,9 @@ var Pontoon = (function (my) {
       var self = this;
 
       self.checkUnsavedChanges(function() {
+        // We must hide batch editor first in order to display FTL editor properly
+        self.clearSelection();
+
         var oldEntity = self.getEditorEntity();
 
         if (newEntity.body || (oldEntity && oldEntity.body)) {
@@ -766,8 +832,6 @@ var Pontoon = (function (my) {
         if (!newEntity.body) {
           self.openEditor(newEntity);
         }
-
-        self.clearSelection();
       });
     },
 
@@ -799,8 +863,7 @@ var Pontoon = (function (my) {
      * Render list of entities to translate
      */
     renderEntityList: function () {
-      var self = this,
-          list = $('#entitylist');
+      var self = this;
 
       $($(self.entities).map($.proxy(self.renderEntity, self))).each(function (idx, entity) {
         self.appendEntity(entity);
@@ -926,7 +989,9 @@ var Pontoon = (function (my) {
       try {
         var utc = new Date(reverse).toISOString();
         return utc.replace(/-/gi, '').replace(/T/gi, '').replace(/:/gi, '').substring(0, 12);
-      } catch (e) {}
+      } catch (e) {
+        // fail silently ?
+      }
     },
 
 
@@ -949,12 +1014,15 @@ var Pontoon = (function (my) {
         return;
       }
 
-      // Set default input values and limits
-      var from = counts[0][0],
-          to = counts[counts.length - 1][0];
+      // Set default input values and limits if values not set
 
-      $('#from').val(Highcharts.dateFormat('%d/%m/%Y %H:%M', from));
-      $('#to').val(Highcharts.dateFormat('%d/%m/%Y %H:%M', to));
+      if (!$('#from').val() || !$('#to').val()) {
+        var from = counts[0][0],
+            to = counts[counts.length - 1][0];
+
+        $('#from').val(Highcharts.dateFormat('%d/%m/%Y %H:%M', from));
+        $('#to').val(Highcharts.dateFormat('%d/%m/%Y %H:%M', to));
+      }
 
       // Render range selector
       Highcharts.setOptions({
@@ -1115,6 +1183,7 @@ var Pontoon = (function (my) {
         status: [],
         extra: [],
         time: '',
+        tag: [],
         author: []
       };
     },
@@ -1163,6 +1232,15 @@ var Pontoon = (function (my) {
         }
       }
 
+      function markTagFilters(type) {
+        for (var i=0, l=filter[type].length; i < l; i++) {
+          var node = $('#filter .menu [data-type="tag-' + filter[type][i] + '"]'),
+              titleNode = node.find('.title');
+          node.addClass('selected');
+          placeholder.push('tag: "' + titleNode.text() + '"');
+        }
+      }
+
       for (var type in filter) {
         if (filter[type] && filter[type] !== []) {
           if (type === 'status' || type === 'extra' || type === 'author') {
@@ -1172,6 +1250,8 @@ var Pontoon = (function (my) {
             var node = $('#filter .menu [data-type="time-range"]');
             node.addClass('selected');
             placeholder.push(node.find('.title').text());
+          } else {
+            markTagFilters(type);
           }
         }
       }
@@ -1209,7 +1289,7 @@ var Pontoon = (function (my) {
      * Validate Time range input field
      */
     validateTimeRangeInput: function() {
-      var from = this.local2server($('#from').val());
+      var from = this.local2server($('#from').val()),
           to = this.local2server($('#to').val());
 
       if (from && to) {
@@ -1316,6 +1396,17 @@ var Pontoon = (function (my) {
     attachEntityListHandlers: function() {
       var self = this;
 
+      function isExtraFilter(el) {
+        return el.hasClass('untranslated') ||
+               el.hasClass('unchanged') ||
+               el.hasClass('has-suggestions') ||
+               el.hasClass('rejected');
+      }
+
+      function isTagFilter(el) {
+        return Array.from(el[0].classList).some(function(clz) { return clz.startsWith('tag-') });
+      }
+
       // Filter entities by multiple filters
       $('#filter').on('click', 'li[data-type]:not(".editing"):not(".all") .status', function(e) {
         e.stopPropagation();
@@ -1326,6 +1417,9 @@ var Pontoon = (function (my) {
             num = -1;
 
         function updateFilterValue(type) {
+          if (type === 'tag') {
+            value = value.substring(4);
+          }
           num = filter[type].indexOf(value);
           if (num === -1) {
             filter[type].push(value);
@@ -1340,7 +1434,10 @@ var Pontoon = (function (my) {
         } else if (el.hasClass('author')) {
           updateFilterValue('author');
 
-        } else if (el.hasClass('untranslated') || el.hasClass('unchanged') || el.hasClass('has-suggestions')) {
+        } else if (isTagFilter(el)) {
+          updateFilterValue('tag');
+
+        } else if (isExtraFilter(el)) {
           // Special case: Untranslated filter is a union of missing, fuzzy, and suggested
           if (value === 'untranslated') {
             if (self.untranslatedFilterApplied(filter.status)) {
@@ -1361,7 +1458,7 @@ var Pontoon = (function (my) {
       });
 
       // Filter entities by a single filter
-      $('#filter').on('click', 'li[data-type]:not(".editing")', function(e) {
+      $('#filter').on('click', 'li[data-type]:not(".editing")', function() {
         var el = $(this),
             value = el.data('type'),
             filter = self.getEmptyFilterObject();
@@ -1372,10 +1469,13 @@ var Pontoon = (function (my) {
             return;
           }
 
+        } else if (isTagFilter(el)) {
+          filter.tag.push(value.substr(4));
+
         } else if (el.hasClass('author')) {
           filter.author.push(value);
 
-        } else if (el.hasClass('untranslated') || el.hasClass('unchanged') || el.hasClass('has-suggestions')) {
+        } else if (isExtraFilter(el)) {
           if (value === 'untranslated') {
             self.applyUntranslatedFilter(filter.status);
 
@@ -1412,8 +1512,15 @@ var Pontoon = (function (my) {
       });
 
       // Update authors and time range
-      $('#filter:not(".opened") .selector').click(function(e) {
+      $('#filter:not(".opened") .selector').click(function() {
         if ($('#filter').is('.opened')) {
+          return;
+        }
+
+        // Disable for All Projects for performance reasons
+        if (self.project.slug === 'all-projects') {
+          self.updateRangePicker([]);
+          self.updateAuthors([]);
           return;
         }
 
@@ -1431,12 +1538,12 @@ var Pontoon = (function (my) {
       });
 
       // Time range editing toggle
-      $('#filter .horizontal-separator .edit').click(function(e) {
+      $('#filter .horizontal-separator .edit').click(function() {
         self.toggleRangeEditing();
       });
 
       // Initialize date & time range picker
-      $('#filter .time-range').on('focusin', 'input:not(".hasDatepicker")', function(e) {
+      $('#filter .time-range').on('focusin', 'input:not(".hasDatepicker")', function() {
         $.timepicker.datetimeRange($('#from'), $('#to'), {
           showTime: false,
           showHour: false,
@@ -1481,7 +1588,7 @@ var Pontoon = (function (my) {
       })();
 
       // Search entities (keyup event also triggered on modifier keys etc.)
-      $('#search').off('input').on('input', function (e) {
+      $('#search').off('input').on('input', function () {
         delay(function () {
           self.searchEntities();
         }, 500);
@@ -1512,7 +1619,6 @@ var Pontoon = (function (my) {
 
         // Prevents from firing multiple calls during onscroll event
         if (entitiesHeight > 0 && (list.scrollTop() >= entitiesHeight * 0.75 - list.height()) && self.hasNext && !self.isLoading()) {
-          var currentTop = list.scrollTop();
           self.loadNextEntities('scroll');
         }
       });
@@ -1528,7 +1634,7 @@ var Pontoon = (function (my) {
         initial.right.width(right).css('left', left);
       }
 
-      function mouseUpHandler(e) {
+      function mouseUpHandler() {
         $(document)
           .unbind('mousemove', mouseMoveHandler)
           .unbind('mouseup', mouseUpHandler);
@@ -1561,9 +1667,11 @@ var Pontoon = (function (my) {
 
 
     /*
-     * Is original string pluralized
+     * If original string is pluralized, return '_plural', else ''. A common use case is
+     * entity['original' + Pontoon.getPluralSuffix()], which returns entity.original or
+     * entity.original_plural.
      */
-    isPluralized: function () {
+    getPluralSuffix: function () {
       var original = '',
           nplurals = this.locale.nplurals,
           plural_rule = this.locale.plural_rule,
@@ -1582,10 +1690,12 @@ var Pontoon = (function (my) {
 
 
     /*
-     * Check if translation length limit exceeded
+     * Remove event first to avoid double handling
      */
-    translationLengthLimitExceeded: function (translation) {
-      return this.translationLengthLimit && this.stripHTML(translation).length > this.translationLengthLimit;
+    reattachSaveButtonHandler: function () {
+      $('#save, #save-anyway')
+        .off('click.save')
+        .on('click.save', this.saveTranslation);
     },
 
 
@@ -1597,18 +1707,6 @@ var Pontoon = (function (my) {
       var self = Pontoon,
           entity = self.getEditorEntity(),
           translation = $('#translation').val();
-
-      // Prevent empty translation submissions if not supported
-      if (translation === '' &&
-        ['properties', 'ini', 'dtd', 'ftl'].indexOf(entity.format) === -1) {
-          self.endLoader('Empty translations cannot be submitted.', 'error');
-          return;
-      }
-
-      if (self.translationLengthLimitExceeded(translation)) {
-        self.endLoader('Translation too long.', 'error');
-        return;
-      }
 
       // Prevent double translation submissions
       $(this).off('click.save');
@@ -1635,9 +1733,9 @@ var Pontoon = (function (my) {
      * Update in-place translation if applicable
      */
     updateInPlaceTranslation: function (translation) {
+      translation = translation || $('#editor textarea:visible:first').val();
       var entity = this.getEditorEntity(),
-          pluralForm = this.getPluralForm(true),
-          translation = translation || $('#translation').val();
+          pluralForm = this.getPluralForm(true);
 
       if (entity.body && pluralForm === 0 && (this.user.canTranslate() || !entity.translation[pluralForm].approved)) {
         this.postMessage("SAVE", {
@@ -1681,7 +1779,7 @@ var Pontoon = (function (my) {
       });
 
       // Zoom in screenshot
-      $('#screenshots').on('click', 'img', function (e) {
+      $('#screenshots').on('click', 'img', function () {
         $('body').append('<div id="overlay">' + this.outerHTML + '</div>');
         $('#overlay').fadeIn('fast');
       });
@@ -1700,7 +1798,8 @@ var Pontoon = (function (my) {
       });
 
       // Insert placeable at cursor, replace selection or at the end if not focused
-      $('#original').on('click', '.placeable', function (e) {
+      // Use mousedown instead of click to be able to detect the last focused textarea
+      $('#source-pane').on('mousedown', '.placeable', function (e) {
         e.preventDefault();
 
         // Ignore for anonymous users
@@ -1708,13 +1807,13 @@ var Pontoon = (function (my) {
           return;
         }
 
-        var textarea = $('#translation'),
-            selectionStart = textarea.prop('selectionStart'),
-            selectionEnd = textarea.prop('selectionEnd'),
-            placeable = $(this).text(),
-            cursorPos = selectionStart + placeable.length,
-            before = textarea.val(),
-            after = before.substring(0, selectionStart) + placeable + before.substring(selectionEnd);
+        var textarea = self.getFocusedOrFirstTextarea();
+        var selectionStart = textarea.prop('selectionStart');
+        var selectionEnd = textarea.prop('selectionEnd');
+        var placeable = $(this).text();
+        var cursorPos = selectionStart + placeable.length;
+        var before = textarea.val();
+        var after = before.substring(0, selectionStart) + placeable + before.substring(selectionEnd);
 
         textarea.val(after).focus();
         textarea[0].setSelectionRange(cursorPos, cursorPos);
@@ -1728,15 +1827,15 @@ var Pontoon = (function (my) {
 
         var entity = self.getEditorEntity(),
             i = tab.index(),
-            original = entity['original' + self.isPluralized()],
-            marked = entity['marked' + self.isPluralized()],
-            title = !self.isPluralized() ? 'Singular' : 'Plural',
+            original = entity['original' + self.getPluralSuffix()],
+            marked = entity['marked' + self.getPluralSuffix()],
+            title = !self.getPluralSuffix() ? 'Singular' : 'Plural',
             source = entity.translation[i].string;
 
         $('#source-pane h2').html(title).show();
         $('#original').html(marked);
 
-        $('#translation').val(source).focus();
+        self.updateAndFocusTranslationEditor(source);
         $('#translation-length .original-length').html(original.length);
         self.moveCursorToBeginning();
         self.updateCurrentTranslationLength();
@@ -1768,7 +1867,7 @@ var Pontoon = (function (my) {
        * - Czech Windows keyboard: Ctrl + Alt + C/F/./,
        * - Polish keyboard: Alt + C
        */
-      $('#editor').on('keydown', '#translation, #ftl-area input', function (e) {
+      $('#editor').on('keydown', 'textarea', function (e) {
         var key = e.which;
 
         // Prevent triggering unnecessary events in 1-column layout
@@ -1811,23 +1910,30 @@ var Pontoon = (function (my) {
           return false;
         }
 
-        // Alt + Down: Go to next string
-        if (e.altKey && key === 40) {
-          self.navigateToEntity('next');
-          return false;
-        }
-
-        // Alt + Up: Go to previous string
-        if (e.altKey && key === 38) {
-          self.navigateToEntity('previous');
-          return false;
-        }
-
         // Tab: Select suggestions
         if (!$('.menu').is(':visible') && key === 9 && !e.ctrlKey) {
 
-          // Prevent in complex FTL mode
-          if ($('#ftl').is('.active')) {
+          // Rich FTL editor with complex message and last element not focused: ignore tab key
+          if (
+            self.fluent.isFTLEditorEnabled() &&
+            self.fluent.isComplexFTL() &&
+            !$('#editor textarea:visible:last').is(':focus')
+          ) {
+            return;
+          }
+
+          // Source FTL editor: insert tab character
+          if (self.fluent.isSourceFTLEditorEnabled()) {
+            e.preventDefault();
+
+            var textarea = $('#translation')[0];
+            var oldStart = textarea.selectionStart;
+            var start = textarea.value.substring(0, textarea.selectionStart);
+            var end = textarea.value.substring(textarea.selectionEnd);
+
+            textarea.value = start + '\t' + end;
+            textarea.selectionEnd = oldStart + 1;
+
             return;
           }
 
@@ -1843,12 +1949,17 @@ var Pontoon = (function (my) {
             .find('li.suggestion').removeClass('hover').end()
             .find('li.suggestion:eq(' + index + ')').addClass('hover').click();
 
+          // Needed to keep the experience smooth in rich FTL editor with complex messages.
+          // Without this, the first field gets focus and the subsequent Tab takes you to
+          // the next field.
+          $('#editor textarea:visible:last').focus();
+
           self.updateScroll(section);
           return false;
         }
 
       // Update length (keydown is triggered too early)
-      }).unbind("input propertychange").bind("input propertychange", function (e) {
+      }).unbind("input propertychange").bind("input propertychange", function () {
         self.updateCurrentTranslationLength();
         self.updateInPlaceTranslation();
         $('.warning-overlay:visible .cancel').click();
@@ -1879,11 +1990,15 @@ var Pontoon = (function (my) {
       $('#copy').click(function (e) {
         e.preventDefault();
 
-        var entity = self.getEditorEntity(),
-            original = entity['original' + self.isPluralized()],
-            source = original;
+        if (!$(this).is(':visible')) {
+          return;
+        }
 
-        $('#translation').val(source).focus();
+        var entity = self.getEditorEntity(),
+            original = entity['original' + self.getPluralSuffix()],
+            source = self.fluent.getSourceStringValue(entity, original);
+
+        self.updateAndFocusTranslationEditor(source);
         self.moveCursorToBeginning();
         self.updateCurrentTranslationLength();
         self.updateInPlaceTranslation();
@@ -1893,10 +2008,20 @@ var Pontoon = (function (my) {
       $('#clear').click(function (e) {
         e.preventDefault();
 
-        $('#translation').val('').focus();
-        self.moveCursorToBeginning();
-        self.updateCurrentTranslationLength();
-        self.updateInPlaceTranslation();
+        // FTL Editor
+        if (self.fluent.isFTLEditorEnabled()) {
+          self.fluent.renderEditor({
+            pk: null,
+            string: ''
+          });
+
+        // Standard Editor
+        } else {
+          self.updateAndFocusTranslationEditor('');
+          self.moveCursorToBeginning();
+          self.updateCurrentTranslationLength();
+          self.updateInPlaceTranslation();
+        }
       });
 
       // Save translation
@@ -1905,24 +2030,35 @@ var Pontoon = (function (my) {
       // Custom search: trigger with Enter
       $('#helpers .machinery input').unbind('keydown.pontoon').bind('keydown.pontoon', function (e) {
         if (e.which === 13) {
-          var source = $(this).val(),
-              entity = self.getEditorEntity();
+          var source = $(this).val();
+          var entity = self.getEditorEntity();
+          var customSearch = true;
 
           // Reset to original string on empty search
           if (!source) {
-            source = entity['original' + self.isPluralized()];
+            source = entity['original' + self.getPluralSuffix()];
+            customSearch = false;
           }
 
           if (self.machinerySource !== source) {
-            self.getMachinery(source);
+            self.getMachinery(source, customSearch);
             self.machinerySource = source;
           }
           return false;
         }
       });
 
+      // Use mousedown instead of click to be able to detect the last focused textarea
+      $('#helpers section').on('mousedown', 'li:not(".disabled")', function () {
+        self.focusedOrFirstTextarea = self.getFocusedOrFirstTextarea();
+      });
+
       // Copy helpers result to translation
       $('#helpers section').on('click', 'li:not(".disabled")', function (e) {
+        e.preventDefault();
+
+        var source = $(this).find('.translation-clipboard').text();
+
         // Ignore clicks on links and buttons
         if ($(e.target).closest('a, menu button').length) {
           return;
@@ -1938,80 +2074,98 @@ var Pontoon = (function (my) {
           return;
         }
 
-        var source = $(this).find('.translation-clipboard').text();
+        // FTL Editor
+        if (self.fluent.isFTLEditorEnabled()) {
+          // Machinery: Update focused or first element only
+          if ($('#helpers .machinery').is(':visible')) {
+            self.focusedOrFirstTextarea.val(source).focus();
+          }
+          // History & Locales: Update entire editor
+          else {
+            self.fluent.renderEditor({
+              pk: true,
+              string: source
+            });
+          }
 
-        $('#translation').val(source).focus();
-        self.moveCursorToBeginning();
-        self.updateCurrentTranslationLength();
-        self.updateInPlaceTranslation();
+        // Standard Editor
+        } else {
+          self.updateAndFocusTranslationEditor(source);
+          self.moveCursorToBeginning();
+          self.updateCurrentTranslationLength();
+          self.updateInPlaceTranslation();
+        }
 
         $('.warning-overlay:visible .cancel').click();
       });
 
       // Approve and delete translations
-      $('#helpers .history').on('click', 'menu .approve', function (e) {
+      $('#helpers .history').on('click', 'menu .approve', function () {
         $(this).parents('li').click();
 
         var entity = self.getEditorEntity(),
             translation = $('#translation').val();
 
-        if (self.translationLengthLimitExceeded(translation)) {
-          self.endLoader('Translation too long.', 'error');
-          return;
-        }
-
         // Mark that user approved translation instead of submitting it
-        self.approvedNotSubmitted = true;
+        self.isApprovedNotSubmitted = true;
         self.updateOnServer(entity, translation, true);
       });
 
-      $('#helpers .history').on('click', 'menu .unapprove', function (e) {
-         var button = $(this),
-             translationId = parseInt($(this).parents('li').data('id'));
+      $('#helpers .history').on('click', 'menu .unapprove', function () {
+        var button = $(this);
+        var translationId = parseInt($(this).parents('li').data('id'));
+        var entity = self.getEditorEntity();
+        var pf = self.getPluralForm(true);
 
-         $.post('/unapprove-translation/', {
-            csrfmiddlewaretoken: $('#server').data('csrf'),
-            translation: translationId,
-            paths: self.getPartPaths(self.currentPart)
-         }).then(function(data) {
-           var entity = self.getEditorEntity(),
-               pf = self.getPluralForm(true);
+        $.post('/unapprove-translation/', {
+          csrfmiddlewaretoken: $('#server').data('csrf'),
+          translation: translationId,
+          paths: self.getPartPaths(self.currentPart)
+        }).then(function(data) {
+          self.stats = data.stats;
+          self.updateTranslation(entity, pf, data.translation);
 
-           self.stats = data.stats;
-           self.updateProgress(entity);
+          // FTL Editor
+          if (self.fluent.isFTLEditorEnabled()) {
+            self.fluent.renderEditor(data.translation);
 
-           self.updateTranslation(entity, pf, data.translation);
+          // Standard Editor
+          } else {
+            self.updateAndFocusTranslationEditor(data.translation.string);
+            self.updateCachedTranslation();
+            self.updateCurrentTranslationLength();
+          }
 
-           $('#translation').val(data.translation.string).focus();
-           self.updateCachedTranslation();
-           self.updateCurrentTranslationLength();
+          if (entity.body && pf === 0) {
+            self.postMessage("SAVE", {
+              translation: data.translation.string,
+              id: entity.id
+            });
+          }
 
-           if (entity.body && pf === 0) {
-             self.postMessage("SAVE", {
-               translation: data.translation.string,
-               id: entity.id
-             });
-           }
+          button.removeClass('unapprove').addClass('approve');
+          button.prop('title', 'Approve');
+          button.parents('li.translated').removeClass('translated').addClass('suggested');
+          button.parents('li').find('.info a').prop('title', self.getApproveButtonTitle({
+            approved: false,
+            unapproved_user: self.user.display_name
+          }));
 
-           button.removeClass('unapprove').addClass('approve');
-           button.prop('title', 'Approve');
-           button.parents('li.translated').removeClass('translated').addClass('suggested');
-           button.parents('li').find('.info a').prop('title', self.getApproveButtonTitle({
-             approved: false,
-             unapproved_user: self.user.display_name
-           }));
-
-           self.endLoader('Translation has been unapproved.');
-         }, function() {
-           self.endLoader("Couldn't unapprove this translation.");
-         });
+          self.endLoader('Translation unapproved');
+        }, function() {
+          self.endLoader("Couldn't unapprove this translation.");
+        });
       });
 
-      $('#helpers .history').on('click', 'menu .delete', function (e) {
+      $('#helpers .history').on('click', 'menu .reject', function () {
         var button = $(this);
-        // Delete
+        var item = button.parents('li');
+        var entity = self.getEditorEntity();
+        var pf = self.getPluralForm(true);
+
+        // Reject a translation.
         $.ajax({
-          url: '/delete-translation/',
+          url: '/reject-translation/',
           type: 'POST',
           data: {
             csrfmiddlewaretoken: $('#server').data('csrf'),
@@ -2019,81 +2173,64 @@ var Pontoon = (function (my) {
             paths: self.getPartPaths(self.currentPart)
           },
           success: function(data) {
-            var item = button.parents('li'),
-                next = item.next(),
-                index = item.index(),
-                entity = self.getEditorEntity(),
-                pluralForm = self.getPluralForm(true);
-
             self.stats = data.stats;
+            self.updateTranslation(entity, pf, data.translation);
 
-            item
-              .addClass('delete')
-              .bind('transitionend', function() {
-                $(this).remove();
-                self.endLoader('Translation deleted');
+            item.addClass('rejected').removeClass('translated suggested fuzzy');
+            item.find('.unapprove').removeClass('unapprove').addClass('approve').prop('title', 'Approve');
+            button.addClass('unreject').removeClass('reject').prop('title', 'Unreject');
 
-                // Active (approved or latest) translation deleted
-                if (index === 0) {
-
-                  // Make newest alternative translation active
-                  if (next.length) {
-                    next.click();
-                    var newTranslation = $('#translation').val();
-
-                    if (entity.body && pluralForm === 0) {
-                      self.postMessage("SAVE", {
-                        translation: newTranslation,
-                        id: entity.id
-                      });
-                    }
-
-                    self.updateTranslation(entity, pluralForm, {
-                      pk: next.data('id'),
-                      string: newTranslation,
-                      approved: false,
-                      fuzzy: false
-                    });
-
-                  // Last translation deleted, no alternative available
-                  } else {
-                    $('#clear').click();
-
-                    if (entity.body && pluralForm === 0) {
-                      self.postMessage("DELETE", {
-                        id: entity.id
-                      });
-                    }
-
-                    self.updateTranslation(entity, pluralForm, {
-                      pk: null,
-                      string: null,
-                      approved: false,
-                      fuzzy: false
-                    });
-
-                    $('#helpers .history ul')
-                      .append('<li class="disabled">' +
-                                '<p>No translations available.</p>' +
-                              '</li>');
-                  }
-
-                  self.moveCursorToBeginning();
-                  self.updateCurrentTranslationLength();
-                  self.updateCachedTranslation();
-                  self.updateFilterUI();
-                }
-
-                // Update number of history entities
-                var count = $('#helpers .history .suggestion').length;
-                $('#helpers a[href="#history"] .count')
-                  .toggle(count > 0)
-                  .html(count);
-              });
+            self.endLoader('Translation rejected');
           },
           error: function() {
             self.endLoader('Oops, something went wrong.', 'error');
           }
+        });
+      });
+
+      $('#helpers .history').on('click', 'menu .unreject', function () {
+        var button = $(this);
+        var translationId = parseInt($(this).parents('li').data('id'));
+        var entity = self.getEditorEntity();
+        var pf = self.getPluralForm(true);
+
+        $.post('/unreject-translation/', {
+          csrfmiddlewaretoken: $('#server').data('csrf'),
+          translation: translationId,
+          paths: self.getPartPaths(self.currentPart)
+        }).then(function(data) {
+          self.stats = data.stats;
+          self.updateTranslation(entity, pf, data.translation);
+
+          // FTL Editor
+          if (self.fluent.isFTLEditorEnabled()) {
+            self.fluent.renderEditor(data.translation);
+
+          // Standard Editor
+          } else {
+            self.updateAndFocusTranslationEditor(data.translation.string);
+            self.updateCachedTranslation();
+            self.updateCurrentTranslationLength();
+          }
+
+          if (entity.body && pf === 0) {
+            self.postMessage("SAVE", {
+              translation: data.translation.string,
+              id: entity.id
+            });
+          }
+
+          button.removeClass('unreject').addClass('reject');
+          button.prop('title', 'Reject');
+          button.parents('li.rejected').removeClass('rejected').addClass('suggested');
+          button.parents('li').find('.info a').prop('title', self.getApproveButtonTitle({
+            rejected: false,
+            unrejected_user: self.user.display_name
+          }));
+
+          self.endLoader('Translation unrejected');
+        }, function() {
+          self.endLoader("Couldn't unreject this translation.");
         });
       });
 
@@ -2118,12 +2255,15 @@ var Pontoon = (function (my) {
       self.allEntitiesSelected = true;
       $('#entitylist .entity:visible').addClass('selected');
 
-      // Fake selected entities count to prevent waiting for getEntities()
       self.selectedEntities = [];
       self.openBatchEditor(true);
 
-      this.getEntities({pkOnly: true}).then(function(data) {
-        self.selectedEntities = data.entity_pks;
+      this.getEntities({pk_only: true}).then(function(data) {
+        var locallySelectedEntities = self.getEntitiesIds('#entitylist .entity:visible.selected'),
+            mergedEntities = data.entity_pks.concat(locallySelectedEntities),
+            uniqueEntities = self.removeDuplicates(mergedEntities);
+
+        self.selectedEntities = uniqueEntities;
         self.openBatchEditor();
       });
     },
@@ -2154,13 +2294,13 @@ var Pontoon = (function (my) {
       });
 
       // Actions
-      $('#approve-all, #delete-all, #replace-all').click(function(e) {
+      $('#approve-all, #reject-all, #replace-all').click(function(e) {
         e.preventDefault();
 
         var button = this,
             action = $(this).attr('id').split('-')[0],
-            find = $('#batch .find').val(),
-            replace = $('#batch .replace').val(),
+            find = encodeURIComponent($('#batch .find').val()),
+            replace = encodeURIComponent($('#batch .replace').val()),
             message = '';
 
         // Disable before request complete
@@ -2171,7 +2311,7 @@ var Pontoon = (function (my) {
         clearTimeout(self.batchButttonTimer);
 
         // Delete check
-        if ($(button).is('#delete-all')) {
+        if ($(button).is('#reject-all')) {
           if ($(button).is('.confirmed')) {
             $(button).removeClass('confirmed show-message');
 
@@ -2210,17 +2350,24 @@ var Pontoon = (function (my) {
             },
             success: function(data) {
               if ('count' in data) {
-                var strings = data.count === 1 ? 'string' : 'strings';
-                message = data.count + ' ' + strings + ' ' + action + 'd';
+                var itemsText = data.count === 1 ? 'string' : 'strings';
+                var actionText = action + 'd';
+
+                if (action === 'reject') {
+                  itemsText = 'suggestion' + (data.count === 1 ? '' : 's');
+                  actionText = 'rejected';
+                }
+
+                message = data.count + ' ' + itemsText + ' ' + actionText;
 
                 // Update UI (entity list, progress, in-place)
                 if (data.count > 0) {
                   var checkedEntities = self.getEntitiesIds('#entitylist .entity.selected');
-                  self.getEntities({entityIds: checkedEntities.join(',')}).then(function(entitiesData, state, hasNext) {
+                  self.getEntities({entity_ids: checkedEntities.join(',')}).then(function(entitiesData) {
                     self.stats = entitiesData.stats;
                     self.updateFilterUI();
 
-                    entitiesMap = {};
+                    var entitiesMap = {};
                     $.each(entitiesData.entities, function() {
                       entitiesMap[this.pk] = this;
                     });
@@ -2234,7 +2381,7 @@ var Pontoon = (function (my) {
                         self.updateEntityUI(entity);
 
                         if (entity.body) {
-                          if ($(button).is('#delete-all') && !entity.translation[0].pk) {
+                          if ($(button).is('#reject-all') && !entity.translation[0].pk) {
                             self.postMessage("DELETE", {
                               id: entity.id
                             });
@@ -2256,7 +2403,7 @@ var Pontoon = (function (my) {
                 $('#batch .replace').focus();
               }
             },
-            error: function(error) {
+            error: function() {
               message = 'Oops, something went wrong';
             },
             complete: function() {
@@ -2321,7 +2468,7 @@ var Pontoon = (function (my) {
             radius = (this.width - context.lineWidth)/2,
             end = null;
 
-        $('#progress .details > div').each(function(i) {
+        $('#progress .details > div').each(function() {
           var type = $(this).attr('class'),
               length = fraction[type] * 2,
               start = (end !== null) ? end : -0.5;
@@ -2356,7 +2503,7 @@ var Pontoon = (function (my) {
       // Update parts menu
       if (entity && total) {
         var paths = [],
-            parts = $('.project .menu li .name[data-slug=' + self.project.slug + ']')
+            parts = $('.project .menu .name[data-slug=' + self.project.slug + ']')
                       .data('parts')[self.locale.code];
 
         $(parts).each(function() {
@@ -2378,18 +2525,22 @@ var Pontoon = (function (my) {
      * entity Entity
      */
     updateEntityUI: function (entity) {
-      var self = this,
-          status = self.getEntityStatus(entity),
-          translation = entity.translation[0],
-          translationString = translation.string || '';
+      var self = this;
+      var status = self.getEntityStatus(entity);
+      var translation = entity.translation[0];
+      var markPlaceables = true;
 
-      translationString = self.fluent.getSimplePreview(translation, translationString, entity);
+      var translationString = self.fluent.getSimplePreview(
+        translation.string,
+        self.markPlaceables(translation.string || ''),
+        markPlaceables
+      );
 
       entity.ui
         .removeClass('translated suggested fuzzy missing partial')
         .addClass(status)
         .find('.translation-string')
-          .html(self.markPlaceables(translationString));
+          .html(translationString);
 
       self.updateProgress(entity);
     },
@@ -2461,15 +2612,55 @@ var Pontoon = (function (my) {
 
 
     /*
-     * Show quality check warnings
+     * Show failed check type
      *
-     * warnings Array of warnings
+     * type 'error' or 'warning'
+     * failedChecks Array of errors or warnings
      */
-    showQualityCheckWarnings: function(warnings) {
-      $('#quality ul').empty();
-      $(warnings).each(function() {
-        $('#quality ul').append('<li>' + this + '</li>');
+    showFailedCheckType: function(type, failedChecks) {
+      $(failedChecks).each(function() {
+        $('#quality ul').append(
+          '<li class="' + type + '">' +
+            '<i class="fa fa-times-circle"></i>' +
+            this +
+          '</li>'
+        );
       });
+    },
+
+
+    /*
+     * Render failed checks panel
+     *
+     * failedChecks Array of errors or warnings
+     */
+    renderFailedChecks: function(failedChecks, messageOnly) {
+      if (!messageOnly) {
+        $('#save-anyway')
+          .toggleClass('approve', this.isApprovedNotSubmitted || false)
+          .show();
+      }
+
+      $('#quality ul').empty();
+
+      if (failedChecks.clErrors) {
+        $('#save-anyway').hide();
+        this.showFailedCheckType('error', failedChecks.clErrors);
+      }
+
+      if (failedChecks.pErrors) {
+        $('#save-anyway').hide();
+        this.showFailedCheckType('error', failedChecks.pErrors);
+      }
+
+      if (failedChecks.clWarnings) {
+        this.showFailedCheckType('warning', failedChecks.clWarnings);
+      }
+
+      if (failedChecks.ttWarnings) {
+        this.showFailedCheckType('warning', failedChecks.ttWarnings);
+      }
+
       $('#quality').show();
     },
 
@@ -2513,14 +2704,14 @@ var Pontoon = (function (my) {
         if (data.type) {
           self.endLoader('Translation ' + data.type);
 
-          if (self.approvedNotSubmitted) {
+          if (self.isApprovedNotSubmitted) {
             $('#helpers .history [data-id="' + data.translation.pk + '"] button.approve')
               .parents('li').addClass('approved')
                 .siblings().removeClass('approved');
           }
 
           var pf = self.getPluralForm(true);
-          self.cachedTranslation = translation;
+          self.cachedTranslation = self.fluent.getFTLEditorContentsAsSource();
           self.updateTranslation(entity, pf, data.translation);
           self.updateInPlaceTranslation(data.translation.string);
           self.updateFilterUI();
@@ -2535,20 +2726,20 @@ var Pontoon = (function (my) {
 
           goToNextTranslation();
 
-        } else if (data.warnings) {
-          self.endLoader();
-          self.showQualityCheckWarnings(data.warnings);
-
         } else if (data.same) {
-          self.endLoader(data.message, 'error');
+          self.endLoader('Same translation already exists.', 'error');
           goToNextTranslation();
+
+        } else if (data.failedChecks) {
+          self.endLoader();
+          self.renderFailedChecks(data.failedChecks);
 
         } else {
           self.endLoader(data, 'error');
         }
 
-        if (!data.warnings) {
-          self.approvedNotSubmitted = null;
+        if (!data.failedChecks) {
+          self.isApprovedNotSubmitted = null;
         }
       }
 
@@ -2574,9 +2765,9 @@ var Pontoon = (function (my) {
           entity: entity.pk,
           translation: self.fluent.serializeTranslation(entity, translation),
           plural_form: submittedPluralForm,
-          original: entity['original' + self.isPluralized()],
-          ignore_check: $('#quality').is(':visible') || !syncLocalStorage || entity.format === 'ftl',
-          approve: self.approvedNotSubmitted || false,
+          original: entity['original' + self.getPluralSuffix()],
+          ignore_warnings: $('#quality').is(':visible') || !syncLocalStorage,
+          approve: self.isApprovedNotSubmitted || false,
           paths: self.getPartPaths(self.currentPart),
           force_suggestions: self.user.forceSuggestions
         },
@@ -2608,12 +2799,11 @@ var Pontoon = (function (my) {
             renderTranslation(data);
           } else {
             self.endLoader('Oops, something went wrong.', 'error');
-            self.approvedNotSubmitted = null;
+            self.isApprovedNotSubmitted = null;
           }
         },
-        complete: function(e) {
-          // Remove event first to avoid double handling
-          $('#save, #save-anyway').off('click.save').on('click.save', self.saveTranslation);
+        complete: function() {
+          self.reattachSaveButtonHandler();
         }
       });
     },
@@ -2632,7 +2822,7 @@ var Pontoon = (function (my) {
         .attr('title', title)
         .find('.title')
           // Only show filename instead of full path
-          .html(title.replace(/^.*[\\\/]/, ''));
+          .html(title.replace(/^.*[/]/, ''));
     },
 
 
@@ -2684,6 +2874,14 @@ var Pontoon = (function (my) {
       // Make sure part menu is always updated
       $('.project .menu [data-slug="' + slug + '"]').parent().click();
 
+      // Update All Projects menu entry parts
+      var parts = {};
+      parts[this.getSelectedLocale()] = [{
+        title: 'all-resources',
+        resource__path: []
+      }];
+      $('.project .menu .all-projects .name').data('parts', parts);
+
       this.updateGoButton();
     },
 
@@ -2693,14 +2891,18 @@ var Pontoon = (function (my) {
      */
     updatePartMenu: function () {
       var locale = this.getSelectedLocale(),
+          project = this.getSelectedProject(),
           parts = this.getProjectData('parts')[locale],
-          currentPart = this.getSelectedPart();
+          currentPart = this.getSelectedPart(),
           part = $.grep(parts, function (e) { return e.title === currentPart; });
 
       // Fallback if selected part not available for the selected locale & project
       if (!part.length) {
         this.updatePartSelector(parts[0].title);
       }
+
+      // Hide part menu for All Projects
+      $('.part.select').toggleClass('hidden', project === 'all-projects');
 
       this.updateGoButton();
     },
@@ -2720,8 +2922,33 @@ var Pontoon = (function (my) {
     attachMainHandlers: function () {
       var self = this;
 
+      // Main keyboard shortcuts
+      $('html').on('keydown', function (e) {
+        var key = e.which;
+
+        // Alt + Down: Go to next string
+        if (e.altKey && key === 40) {
+          self.navigateToEntity('next');
+          return false;
+        }
+
+        // Alt + Up: Go to previous string
+        if (e.altKey && key === 38) {
+          self.navigateToEntity('previous');
+          return false;
+        }
+
+        // Esc: Close warning overlay
+        if (key === 27) {
+          if ($('.warning-overlay').is(':visible')) {
+            $('.warning-overlay .cancel').click();
+          }
+          return false;
+        }
+      });
+
       // iFrame fix on hiding menus
-      $('body').bind("click.main", function (e) {
+      $('body').bind("click.main", function () {
         $('#iframe-cover').hide();
       });
 
@@ -2773,7 +3000,7 @@ var Pontoon = (function (my) {
       });
 
       // Project menu handler
-      $('.project .menu li:not(".no-match")').click(function (e) {
+      $('.project .menu li:not(".no-match"), .static-links .all-projects').click(function () {
         var project = $(this).find('.name'),
             name = project.html(),
             slug = project.data('slug'),
@@ -2791,8 +3018,15 @@ var Pontoon = (function (my) {
             self.updatePartMenu();
 
           } else {
+            var url;
+            if (slug !== 'all-projects') {
+              url = '/' + locale + '/' + slug + '/parts/';
+            } else {
+              url = '/teams/' + locale + '/stats/';
+            }
+
             $.ajax({
-              url: '/' + locale + '/' + slug + '/parts/',
+              url: url,
               success: function(parts) {
                 if (projectParts) {
                   projectParts[locale] = parts;
@@ -2813,7 +3047,6 @@ var Pontoon = (function (my) {
         var locale = self.getSelectedLocale(),
             parts = self.getProjectData('parts')[locale],
             menu = $(this).siblings('.menu').find('ul'),
-            project = self.getSelectedProject(),
             currentProject = self.getProjectData('slug') === self.project.slug,
             currentLocale = self.getLocaleData('code') === self.locale.code;
 
@@ -2846,7 +3079,7 @@ var Pontoon = (function (my) {
       });
 
       // Parts menu handler
-      $('.part .menu').on('click', 'li:not(".no-match"), .static-links .all-resources', function (e) {
+      $('.part .menu').on('click', 'li:not(".no-match"), .static-links .all-resources', function () {
         var title = $(this).find('span:first').html();
         self.updatePartSelector(title);
         self.updateGoButton();
@@ -2901,10 +3134,15 @@ var Pontoon = (function (my) {
       var self = this,
           $forAuthors = $('#filter').find('.for-authors').toggle(authors.length > 0);
 
+      var selectedAuthors = $('#filter .menu li.author.selected').map(function() {
+        return $.trim($(this).data("type"));
+      }).get();
+
       $('#filter .menu li.author').remove();
 
       $.each(authors, function() {
-        $forAuthors.after('<li class="author" data-type="' + this.email + '">' +
+        var selected = (selectedAuthors.includes(this.email)) ? ' selected' : '';
+        $forAuthors.after('<li class="author' + selected + '" data-type="' + this.email + '">' +
           '<figure>' +
             '<span class="sel">' +
               '<span class="status fa"></span>' +
@@ -2942,10 +3180,19 @@ var Pontoon = (function (my) {
 
 
     /*
-     * Update textarea lang and dir attributes
+     * Update visibility of Make Suggestion toggle.
+     * It should only be visible to Translators.
+     */
+    updateMakeSuggestionToggle: function () {
+      $('#settings .menu .force-suggestions').toggle(this.user.canTranslate());
+    },
+
+
+    /*
+     * Update textarea lang, dir and data-script attributes
      */
     updateTextareaAttributes: function () {
-      $('#translation')
+      $('#editor textarea')
         .attr('dir', this.locale.direction)
         .attr('lang', this.locale.code)
         .attr('data-script', this.locale.script);
@@ -2959,8 +3206,12 @@ var Pontoon = (function (my) {
       var code = this.locale.code,
           slug = this.project.slug;
 
-      $('#profile .admin-current-project a').attr('href', '/admin/projects/' + slug + '/');
+      $('#profile .admin-current-project a')
+        .attr('href', '/admin/projects/' + slug + '/')
+        .toggle(this.project.slug !== 'all-projects');
       $('#profile .upload').toggle(this.state.paths && this.user.canTranslate() && this.part !== 'all-resources');
+      $('#profile .download, #profile .upload + .horizontal-separator').toggle(this.project.slug !== 'all-projects');
+
       $('#profile .langpack')
         .toggle(this.project.langpack_url !== '')
         .find('a').attr('href', this.project.langpack_url.replace('{locale_code}', this.locale.code));
@@ -2978,19 +3229,25 @@ var Pontoon = (function (my) {
 
 
     /*
-     * Mark current project & locale and set links
+     * Mark current values and set links
      */
     updateMainMenu: function () {
+      // Mark currect values
+      $('header .menu li').removeClass('current');
       $('.project .menu li .name[data-slug=' + this.project.slug + '], ' +
         '.locale .menu li .language[data-code=' + this.locale.code + ']')
-        .parent().addClass('current').siblings().removeClass('current');
+        .parent().addClass('current');
+      $('.static-links .all-projects')
+        .toggleClass('current', this.project.slug === 'all-projects');
 
-      $('.static-links .current-team').parent()
-        .attr('href', '/' + this.locale.code);
-      $('.static-links .current-project').parent()
-        .attr('href', '/projects/' + this.project.slug);
-      $('.static-links .current-localization').parent()
-        .attr('href', '/' + this.locale.code + '/' + this.project.slug);
+      // Set current links
+      $('.static-links .current-team')
+        .parent().attr('href', '/' + this.locale.code);
+      $('.static-links .current-project')
+        .toggle(this.project.slug !== 'all-projects')
+        .parent().attr('href', '/projects/' + this.project.slug);
+      $('.static-links .current-localization')
+        .parent().attr('href', '/' + this.locale.code + '/' + this.project.slug);
 
       this.updateGoButton();
     },
@@ -3050,7 +3307,6 @@ var Pontoon = (function (my) {
       self.updateProjectInfo();
       self.updateProfileMenu();
       self.updateTextareaAttributes();
-      self.updateSaveButtons();
       self.resetTimeRange();
       self.updateFilterUI();
       self.renderEntityList();
@@ -3137,10 +3393,9 @@ var Pontoon = (function (my) {
       if (Pontoon.project && !Pontoon.project.win) {
         return false;
       }
-
-      var otherWindow = otherWindow || Pontoon.project.win,
-          targetOrigin = targetOrigin || Pontoon.project.url,
-          message = {
+      otherWindow = otherWindow || Pontoon.project.win;
+      targetOrigin = targetOrigin || Pontoon.project.url;
+      var message = {
             type: messageType,
             value: messageValue
           };
@@ -3166,9 +3421,9 @@ var Pontoon = (function (my) {
      */
     waitForAttribute: function(propery, times, mainDeferred) {
       var self = this,
-          d = mainDeferred || $.Deferred(),
-          // How many times should we check entities before displaying an error.
-          times = typeof times === 'undefined' ? 100 : times;
+          d = mainDeferred || $.Deferred();
+      // How many times should we check entities before displaying an error.
+      times = typeof times === 'undefined' ? 100 : times;
 
       if (times === -1) {
         d.reject();
@@ -3414,18 +3669,25 @@ var Pontoon = (function (my) {
 
       this.locale = self.getLocaleData();
 
+      // Convert CLDR plurals to Array
+      if (!Array.isArray(this.locale.cldr_plurals)) {
+        this.locale.cldr_plurals = this.locale.cldr_plurals.split(', ');
+      }
+
+      // Generate examples for CLDR plurals
+      if (!this.locale.plural_examples) {
+        self.generateLocalePluralExamples();
+      }
+
       this.project = {
         win: projectWindow,
         url: "",
         title: "",
         slug: self.getProjectData('slug'),
-        info: self.getProjectData('info'),
+        info: self.getProjectData('info') || '',
         width: self.getProjectWidth(),
         links: self.getProjectData('links') === 'True' ? true : false,
-        langpack_url: self.getProjectData('langpack_url'),
-        hasSubPages: self.getProjectData('parts')[this.locale.code].some(function(item) {
-          return !!item['url'];
-        })
+        langpack_url: self.getProjectData('langpack_url') || ''
       };
 
       /* Copy of User.can_translate(), used on client to improve performance */
@@ -3433,7 +3695,13 @@ var Pontoon = (function (my) {
         var managedLocales = $('#server').data('user-managed-locales') || [],
             translatedLocales = $('#server').data('user-translated-locales') || [],
             translatedProjects = $('#server').data('user-translated-projects') || {},
-            localeProject = self.locale.code + '-' + self.project.slug;
+            project = self.project;
+
+        if (self.getEditorEntity()) {
+          project = self.getEditorEntity().project;
+        }
+
+        var localeProject = self.locale.code + '-' + project.slug;
 
         if ($.inArray(self.locale.code, managedLocales) !== -1) {
           return true;
@@ -3545,19 +3813,20 @@ var Pontoon = (function (my) {
      * Load entities, store data, prepare UI
      */
     getEntities: function(opts) {
+      opts = opts || {};
       var self = this,
           state = self.state,
-          opts = opts || {},
           params = {
             'project': state.project,
             'locale': state.locale,
             'paths': self.getPartPaths(self.currentPart),
             'search': self.getSearch(),
+            'tag': self.getFilter('tag').join(','),
             'status': self.getFilter('status').join(','),
             'extra': self.getFilter('extra').join(','),
             'time': self.getFilter('time'),
             'author': self.getFilter('author').join(','),
-            'inplaceEditor': self.requiresInplaceEditor()
+            'inplace_editor': self.requiresInplaceEditor()
           },
           deferred = $.Deferred();
 
@@ -3592,6 +3861,8 @@ var Pontoon = (function (my) {
       self.stats = entitiesData.stats;
       self.entities = entitiesData.entities;
       self.hasNext = hasNext;
+
+      self.updateTitle();
 
       // No entities found
       if (!self.entities.length) {
@@ -3742,16 +4013,35 @@ var Pontoon = (function (my) {
     },
 
     highlightQuery: function(item) {
-      var searchQuery = this.getSearch(),
-          item = item || $('#entitylist .source-string, #entitylist .translation-string');
+      var searchQuery = this.getSearch();
+      item = item || $('#entitylist .source-string, #entitylist .translation-string');
 
       item.unmark();
       if (searchQuery) {
-        item.mark(searchQuery, {
-          acrossElements: true,
-          caseSensitive: false,
-          className: 'search',
-          separateWordSearch: false
+        var unusable = '☠'
+        var reg = new RegExp(unusable, "g");
+        searchQuery = searchQuery.replace(/\\"/g, unusable);
+        var queries = searchQuery.match(/[^\s"]+|"[^"]+"/g);
+
+        if (!queries) {
+          return;
+        }
+        var i = queries.length;
+        while(i--) {
+          queries[i] = queries[i].replace(/^["]|["]$/g, '');
+          queries[i] = queries[i].replace(reg, '"');
+        }
+        // sort array in decreasing order of string length
+        queries.sort(function(a,b) {
+          return b.length - a.length;
+        });
+        queries.forEach(function(query) {
+          item.mark(query, {
+            acrossElements: true,
+            caseSensitive: false,
+            className: 'search',
+            separateWordSearch: false
+          });
         });
       }
     },
@@ -3760,7 +4050,7 @@ var Pontoon = (function (my) {
       var self = this,
           requiresInplaceEditor = self.requiresInplaceEditor(),
           // Join IDs into string due to bug 1344322
-          excludeEntities = requiresInplaceEditor ? {} : {excludeEntities: self.getEntitiesIds('#entitylist .entity').join(',')};
+          excludeEntities = requiresInplaceEditor ? {} : {exclude_entities: self.getEntitiesIds('#entitylist .entity').join(',')};
 
       self.setSidebarLoading(true);
 
@@ -3830,7 +4120,7 @@ var Pontoon = (function (my) {
      * Get currently selected part name
      */
     getSelectedPart: function() {
-      part = $('.part .selector').attr('title');
+      var part = $('.part .selector').attr('title');
       if (part === 'All Resources') {
         part = 'all-resources';
       }
@@ -3852,7 +4142,7 @@ var Pontoon = (function (my) {
      */
     getProjectData: function(attribute) {
       var slug = this.getSelectedProject();
-      return $('.project .menu li .name[data-slug=' + slug + ']').data(attribute);
+      return $('.project .menu .name[data-slug=' + slug + ']').data(attribute);
     },
 
 
@@ -3861,7 +4151,7 @@ var Pontoon = (function (my) {
      *
      * title Part title
      */
-    updateCurrentPart: function(title) {
+    updateCurrentPart: function() {
       var locale = this.getSelectedLocale(),
           part = this.getSelectedPart(),
           availableParts = this.getProjectData('parts')[locale],
@@ -3875,7 +4165,21 @@ var Pontoon = (function (my) {
         this.currentPart = matchingParts[0];
       }
 
+      $('#filter .menu li[class^="tag-"], #filter .menu li.tags-header')
+        .toggle(this.currentPart.title === 'all-resources');
+
       this.updatePartSelector(this.currentPart.title);
+    },
+
+
+    /*
+     * Update title of the current view.
+     */
+    updateTitle: function() {
+      var project = this.getProjectData(),
+          locale = this.getLocaleData();
+
+      document.title = project.name + ' · ' + locale.name + ' (' + locale.code + ')';
     },
 
 
@@ -3883,8 +4187,8 @@ var Pontoon = (function (my) {
      * Updates Pontoon and history state, and the URL
      */
     pushState: function(state) {
+      state = state || this.getState();
       var self = this,
-          state = state || self.getState(),
           url = '/' + state.locale + '/' + state.project + '/' + state.paths + '/',
           queryParams = {};
 
@@ -3897,6 +4201,10 @@ var Pontoon = (function (my) {
 
       if (state.filter.status.length > 0) {
         queryParams.status = state.filter.status.join(',');
+      }
+
+      if (state.filter.tag.length > 0) {
+        queryParams.tag = state.filter.tag.join(',');
       }
 
       if (state.filter.extra.length > 0) {
@@ -3933,8 +4241,8 @@ var Pontoon = (function (my) {
      * Get value from the querystring
      */
     getQueryParam: function(name) {
+      name = name.replace(/[[\]]/g, "\\$&");
       var url = window.location.href,
-          name = name.replace(/[\[\]]/g, "\\$&"),
           regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)", "i"),
           results = regex.exec(url);
 
@@ -3942,7 +4250,18 @@ var Pontoon = (function (my) {
         return null;
       }
 
-      return decodeURIComponent(results[2].replace(/\+/g, " "));
+      var encodedURI = results[2].replace(/\+/g, " ");
+
+      try {
+        return decodeURIComponent(encodedURI);
+
+      // If querystring not encoded, we need to encode it first
+      } catch (e) {
+        if (e instanceof URIError) {
+          encodedURI = encodeURIComponent(encodedURI);
+          return decodeURIComponent(encodedURI);
+        }
+      }
     },
 
 
@@ -3972,6 +4291,7 @@ var Pontoon = (function (my) {
         status: this.getQueryParam('status') ? this.getQueryParam('status').split(',') : [],
         extra: this.getQueryParam('extra') ? this.getQueryParam('extra').split(',') : [],
         time: this.getQueryParam('time'),
+        tag: this.getQueryParam('tag') ? this.getQueryParam('tag').split(',') : [],
         author: this.getQueryParam('author') ? this.getQueryParam('author').split(',') : []
       };
       state.search = this.getQueryParam('search');
@@ -3983,7 +4303,8 @@ var Pontoon = (function (my) {
       this.updateFilterUI(state.filter);
 
       // Fallback to first available part if no matches found (mistyped URL)
-      var paths = requestedPaths = this.getSelectedPart();
+      var requestedPaths = this.getSelectedPart(),
+          paths = requestedPaths;
       this.updateCurrentPart(requestedPaths);
       paths = this.currentPart.title;
 
@@ -4001,7 +4322,7 @@ var Pontoon = (function (my) {
 window.onpopstate = function(e) {
   if (e.state) {
     // Update main menu
-    $('.project .menu li [data-slug="' + e.state.project + '"]').parent().click();
+    $('.project .menu .name[data-slug="' + e.state.project + '"]').parent().click();
     $('.locale .menu li .language[data-code="' + e.state.locale + '"]').parent().click();
 
     if (e.state.paths) {
@@ -4031,6 +4352,7 @@ Pontoon.user = {
 Pontoon.attachMainHandlers();
 Pontoon.attachEntityListHandlers();
 Pontoon.attachEditorHandlers();
+Pontoon.fluent.attachFTLEditorHandlers();
 Pontoon.attachBatchEditorHandlers();
 
 Pontoon.updateInitialState();

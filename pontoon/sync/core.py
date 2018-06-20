@@ -1,5 +1,6 @@
 from functools import wraps
 import logging
+import requests
 
 from collections import Counter
 
@@ -18,7 +19,6 @@ from pontoon.base.models import (
 )
 from pontoon.sync.changeset import ChangeSet
 from pontoon.sync.vcs.models import VCSProject
-from pontoon.sync.utils import locale_directory_path
 
 log = logging.getLogger(__name__)
 
@@ -51,8 +51,10 @@ def serial_task(timeout, lock_key="", on_error=None, **celery_args):
             lock_name = "serial_task.{}[{}]".format(self.name, lock_key.format(*args, **kwargs))
             # Acquire the lock
             if not cache.add(lock_name, True, timeout=timeout):
-                error = RuntimeError("Can't execute task '{}' because the previously called"
-                    " task is still running.".format(lock_name))
+                error = RuntimeError(
+                    "Can't execute task '{}' because the previously called "
+                    "task is still running.".format(lock_name)
+                )
                 if callable(on_error):
                     on_error(error, *args, **kwargs)
                 raise error
@@ -125,7 +127,8 @@ def update_resources(db_project, vcs_project):
 
 
 def update_translations(db_project, vcs_project, locale, changeset):
-    for key, db_entity, vcs_entity in collect_entities(db_project, vcs_project, db_project.unsynced_locales):
+    all_entities = collect_entities(db_project, vcs_project, db_project.unsynced_locales)
+    for key, db_entity, vcs_entity in all_entities:
         # If we don't have both the db_entity and cs_entity we can't
         # do anything with the translations.
         if db_entity is None or vcs_entity is None:
@@ -156,8 +159,31 @@ def update_translated_resources(db_project, vcs_project, locale):
         if vcs_resource is not None:
             resource_exists = vcs_resource.files.get(locale) is not None
             if resource_exists or resource.is_asymmetric:
-                translatedresource, _ = TranslatedResource.objects.get_or_create(resource=resource, locale=locale)
+                translatedresource, _ = (
+                    TranslatedResource.objects.get_or_create(resource=resource, locale=locale)
+                )
                 translatedresource.calculate_stats()
+
+
+def update_translated_resources_no_files(db_project, locale, changed_resources):
+    """
+    Create/update TranslatedResource entries if files aren't available. This typically happens when
+    originals change and translations don't, so we don't pull locale repositories.
+    """
+    for resource in changed_resources:
+        # We can only update asymmetric (monolingual) TranslatedResources. For bilingual files we
+        # only create TranslatedResources if the file is present in the repository for the locale,
+        # which we cannot check without files.
+        if not resource.is_asymmetric:
+            log.error(
+                'Unable to calculate stats for asymmetric resource: {resource}.'.format(resource)
+            )
+            continue
+
+        translatedresource, _ = (
+            TranslatedResource.objects.get_or_create(resource=resource, locale=locale)
+        )
+        translatedresource.calculate_stats()
 
 
 def get_vcs_entities(vcs_project):
@@ -165,10 +191,12 @@ def get_vcs_entities(vcs_project):
 
 
 def get_changed_entities(db_project, changed_resources):
-    entities = (Entity.objects
-            .select_related('resource')
-            .prefetch_related('changed_locales')
-            .filter(resource__project=db_project, obsolete=False))
+    entities = (
+        Entity.objects
+        .select_related('resource')
+        .prefetch_related('changed_locales')
+        .filter(resource__project=db_project, obsolete=False)
+    )
 
     if changed_resources is not None:
         entities = entities.filter(resource__path__in=changed_resources)
@@ -176,7 +204,11 @@ def get_changed_entities(db_project, changed_resources):
 
 
 def get_db_entities(db_project, changed_resources=None):
-    return {entity_key(entity): entity for entity in get_changed_entities(db_project, changed_resources)}
+    return {
+        entity_key(entity): entity for entity in get_changed_entities(
+            db_project, changed_resources
+        )
+    }
 
 
 def entity_key(entity):
@@ -188,20 +220,39 @@ def entity_key(entity):
     return ':'.join([entity.resource.path, key])
 
 
-def pull_changes(db_project, source_only=False):
+def pull_changes(db_project, locales=None):
     """
     Update the local files with changes from the VCS. Returns True
     if any of the updated repos have changed since the last sync.
     """
     changed = False
-    repositories = [db_project.source_repository] if source_only else db_project.repositories.all()
     repo_locales = {}
-    skip_locales = []  # Skip already pulled locales
+
+    # When syncing sources, pull source repository only.
+    if locales is None:
+        repositories = [db_project.source_repository]
+    # When syncing locales and some have changed, pull all project repositories.
+    elif locales:
+        repositories = db_project.repositories.all()
+    # When syncing locales and none have changed, quit early.
+    else:
+        return changed, repo_locales
+
+    locales = locales or db_project.locales.all()
+
+    # Skip already pulled locales. Useful for projects with multiple repositories (e.g. Firefox),
+    # since we don't store the information what locale belongs to what repository.
+    pulled_locales = []
 
     for repo in repositories:
-        repo_revisions = repo.pull(skip_locales)
+        remaining_locales = locales.exclude(code__in=pulled_locales)
+        if not remaining_locales:
+            break
+
+        repo_revisions = repo.pull(remaining_locales)
         repo_locales[repo.pk] = Locale.objects.filter(code__in=repo_revisions.keys())
-        skip_locales += repo_revisions.keys()
+        pulled_locales += repo_revisions.keys()
+
         # If any revision is None, we can't be sure if a change
         # happened or not, so we default to assuming it did.
         unsure_change = None in repo_revisions.values()
@@ -228,6 +279,86 @@ def commit_changes(db_project, vcs_project, changeset, locale):
         'authors': set(authors)
     })
 
-    locale_path = locale_directory_path(vcs_project.checkout_path, locale.code)
+    locale_path = vcs_project.locale_directory_paths[locale.code]
     repo = db_project.repository_for_path(locale_path)
     repo.commit(commit_message, commit_author, locale_path)
+
+
+def get_changed_locales(db_project, locales, now):
+    """
+    Narrow down locales to the ones that have changed since the last sync by fetching latest
+    repository commit hashes via API. For projects with many repositories, this is much faster
+    than running VCS pull/clone for each repository.
+    """
+    repos = db_project.translation_repositories()
+
+    # Requirement: all translation repositories must have API configured.
+    for repo in repos:
+        if not repo.api_config:
+            return locales
+
+    log.info('Fetching latest commit hashes for project {0} started.'.format(db_project.slug))
+
+    # If locale has changed in the DB, we need to sync it.
+    changed_locale_pks = list(locales.filter(
+        changedentitylocale__entity__resource__project=db_project,
+        changedentitylocale__when__lte=now
+    ).values_list('pk', flat=True))
+
+    unchanged_locale_pks = []
+    error_locale_pks = set()
+
+    for repo in repos:
+        for locale in locales:
+            # If we already processed the locale, we can move on.
+            if locale.pk in changed_locale_pks + unchanged_locale_pks:
+                continue
+
+            try:
+                locale_api_endpoint = repo.api_config['endpoint'].format(locale_code=locale.code)
+                response = requests.get(locale_api_endpoint)
+
+                # Raise exception on 4XX client error or 5XX server error response
+                response.raise_for_status()
+
+                # If locale has not synced yet, we need to sync it.
+                last_synced_commit_id = repo.get_last_synced_revisions(locale.code)
+                if not last_synced_commit_id:
+                    changed_locale_pks.append(locale.pk)
+                    continue
+
+                # If locale has changed in the VCS, we need to sync it.
+                latest_commit_id = repo.api_config['get_key'](response.json())
+                if not latest_commit_id.startswith(last_synced_commit_id):
+                    changed_locale_pks.append(locale.pk)
+
+                # If locale hasn't changed in the VCS, we don't need to sync it.
+                else:
+                    unchanged_locale_pks.append(locale.pk)
+
+            # Errors and exceptions can mean locale is in a different repository or indicate
+            # an actual network problem.
+            except requests.exceptions.RequestException:
+                error_locale_pks.add(locale.pk)
+
+    # Check if any locale for which the exception was raised hasn't been processed yet.
+    # For those locales we can't be sure if a change happened, so we assume it did.
+    for l in error_locale_pks:
+        if l not in changed_locale_pks + unchanged_locale_pks:
+            log.error(
+                'Unable to fetch latest commit hash for locale {locale} in project {project}'
+                .format(locale=Locale.objects.get(pk=l), project=db_project.slug)
+            )
+            changed_locale_pks.append(locale.pk)
+
+    changed_locales = db_project.locales.filter(pk__in=changed_locale_pks)
+
+    log.info(
+        'Fetching latest commit hashes for project {project} complete. Changed locales: {locales}.'
+        .format(
+            project=db_project.slug,
+            locales=', '.join(changed_locales.values_list("code", flat=True))
+        )
+    )
+
+    return changed_locales

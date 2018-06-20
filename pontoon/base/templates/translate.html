@@ -10,6 +10,8 @@
 
 {% block class %}translate{% endblock %}
 
+{% block title %}{{ project.name }} &middot; {{ locale.name }} ({{ locale.code }}){% endblock %}
+
 {% block content %}
 <!-- Server data -->
 <div id="server"
@@ -115,7 +117,7 @@
             <li><a href="{{ url('pontoon.contributors') }}"><i class="fa fa-trophy fa-fw"></i>Top Contributors</a></li>
             <li><a href="{{ url('pontoon.machinery') }}"><i class="fa fa-search fa-fw"></i>Machinery</a></li>
             <li><a href="{{ url('pontoon.terms') }}"><i class="fa fa-legal fa-fw"></i>Terms of Use</a></li>
-            <li><a href="https://developer.mozilla.org/docs/Mozilla/Localization/Localizing_with_Pontoon"><i class="fa fa-life-ring fa-fw"></i>Help</a></li>
+            <li><a href="https://mozilla-l10n.github.io/localizer-documentation/tools/pontoon/"><i class="fa fa-life-ring fa-fw"></i>Help</a></li>
 
             <li class="horizontal-separator"></li>
 
@@ -169,11 +171,19 @@
             {{ Filter.item('suggested', 'Suggested', count=True) }}
             {{ Filter.item('translated', 'Translated', count=True) }}
 
+            {% if tags %}
+            <li class="horizontal-separator tags-header">Tags</li>
+            {% for tag in tags %}
+            {{ Filter.item('tag-' + tag.slug, tag.name, priority=tag.priority) }}
+            {% endfor %}
+            {% endif %}
+
             <li class="horizontal-separator">Extra Filters</li>
 
             {{ Filter.item('untranslated', 'Untranslated') }}
             {{ Filter.item('unchanged', 'Unchanged') }}
-            {{ Filter.item('has-suggestions', 'Has Suggestions') }}
+            {{ Filter.item('has-suggestions', 'Unreviewed Suggestions') }}
+            {{ Filter.item('rejected', 'Rejected') }}
 
             <li class="horizontal-separator for-time-range">
               Translation Time
@@ -282,10 +292,7 @@
         <section class="main-value">
           <ul>
             <li>
-              <label class="id" for="entity-value">
-                <span>Value</span>
-              </label>
-              <input type="text" id="entity-value" class="value" placeholder="Enter translation"></li>
+              <textarea {% if not user.is_authenticated() %} readonly {% endif %} id="only-value" placeholder="Type translation and press Enter to save"></textarea>
             </li>
           </ul>
         </section>
@@ -294,10 +301,10 @@
           <ul class="template">
             <li class="custom-attribute clearfix">
               <div class="wrapper">
-                <input type="text" class="id" placeholder="enter-attribute-id">
+                <textarea class="id" placeholder="enter-attribute-id"></textarea>
                 <sub class="fa fa-remove remove" title="Remove"></sub>
               </div>
-              <input type="text" class="value" placeholder="Enter attribute value">
+              <textarea class="value" placeholder="Enter attribute value"></textarea>
             </li>
           </ul>
         </section>
@@ -325,10 +332,8 @@
             <div class="selector fa fa-cog" title="Settings"></div>
             <div class="menu">
               <ul>
-                {{ Checkbox.checkbox('Quality Checks', class='quality-checks', attribute='quality_checks', is_enabled=user.profile.quality_checks, title='Run quality checks before submitting translations') }}
-                {% if user.can_translate(project=project, locale=locale) %}
+                {{ Checkbox.checkbox('Translate Toolkit Checks', class='quality-checks', attribute='quality_checks', is_enabled=user.profile.quality_checks, title='Run Translate Toolkit checks before submitting translations') }}
                 {{ Checkbox.checkbox('Make Suggestions', class='force-suggestions', attribute='force_suggestions', is_enabled=user.profile.force_suggestions, title='Save suggestions instead of translations') }}
-                {% endif %}
                 <li class="horizontal-separator"></li>
                 <li><a href="{{ url('pontoon.contributors.settings') }}">Change All Settings</a></li>
               </ul>
@@ -388,21 +393,18 @@
             <li class="active">
               <a href="#history" title="Translation history">
                 <span>History
-                  <span class="fa fa-cog fa-lg fa-spin"></span>
                   <span class="count"></span>
                 </span>
               </a>
             </li><li>
               <a href="#machinery" title="Translation memory, machine translation & terminology">
                 <span>Machinery
-                  <span class="fa fa-cog fa-lg fa-spin"></span>
                   <span class="count"></span>
                 </span>
               </a>
             </li><li>
               <a href="#other-locales" title="Translations to other languages">
                 <span>Locales
-                  <span class="fa fa-cog fa-lg fa-spin"></span>
                   <span class="count"><span class="preferred"></span><span class="plus"></span><span class="remaining"></span></span>
                 </span>
               </a>
@@ -456,7 +458,7 @@
         <div class="review">
           <h2>Review translations</h2>
           {{ Button.button('approve-all', 'Approve all') }}
-          {{ Button.button('delete-all', 'Delete all') }}
+          {{ Button.button('reject-all', 'Reject all suggestions') }}
         </div>
 
         <div class="find-replace">

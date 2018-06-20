@@ -1,8 +1,8 @@
 import json
-import logging
 
 from dateutil.relativedelta import relativedelta
 from django.contrib import messages
+from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.models import User
@@ -23,9 +23,6 @@ from django.views.generic import TemplateView
 from pontoon.base import forms
 from pontoon.base.models import Locale, Project
 from pontoon.base.utils import require_AJAX
-
-
-log = logging.getLogger('pontoon')
 
 
 @login_required(redirect_field_name='', login_url='/403')
@@ -122,14 +119,14 @@ def toggle_user_profile_attribute(request, username):
 @login_required(redirect_field_name='', login_url='/403')
 @require_POST
 @transaction.atomic
-def save_user_name(request):
-    """Save user name."""
-    profile_form = forms.UserProfileForm(request.POST, instance=request.user)
+def save_custom_homepage(request):
+    """Save custom homepage."""
+    form = forms.UserCustomHomepageForm(request.POST, instance=request.user.profile)
 
-    if not profile_form.is_valid():
-        return HttpResponseBadRequest(u'\n'.join(profile_form.errors['first_name']))
+    if not form.is_valid():
+        return HttpResponseBadRequest(u'\n'.join(form.errors['custom_homepage']))
 
-    profile_form.save()
+    form.save()
 
     return HttpResponse('ok')
 
@@ -138,24 +135,59 @@ def save_user_name(request):
 def settings(request):
     """View and edit user settings."""
     if request.method == 'POST':
-        form = forms.UserLocalesSettings(request.POST, instance=request.user.profile)
-        if form.is_valid():
-            form.save()
+        locales_form = forms.UserLocalesOrderForm(
+            request.POST,
+            instance=request.user.profile,
+        )
+        profile_form = forms.UserProfileForm(
+            request.POST,
+            instance=request.user,
+        )
+        user = get_object_or_404(User, username=request.user.username)
+
+        if locales_form.is_valid() and profile_form.is_valid():
+            locales_form.save()
+            profile_form.save()
+
             messages.success(request, 'Settings saved.')
-            return redirect(request.POST.get('return_url', '/'))
+
+            if user.email != request.user.email:
+                logout(request)
+                return redirect(request.POST.get('return_url', '/'))
+    else:
+        profile_form = forms.UserProfileForm(instance=request.user)
 
     selected_locales = list(request.user.profile.sorted_locales)
-    available_locales = Locale.objects.exclude(pk__in=[l.pk for l in selected_locales])
+    available_locales = Locale.objects.exclude(
+        pk__in=[l.pk for l in selected_locales]
+    )
+
+    default_homepage_locale = Locale(name='Default homepage', code='')
+    all_locales = list(Locale.objects.all())
+    all_locales.insert(0, default_homepage_locale)
+
+    # Set custom homepage selector value
+    custom_homepage = request.user.profile.custom_homepage
+    if custom_homepage:
+        custom_homepage_locale = (
+            Locale.objects.filter(code=custom_homepage).first()
+        )
+    else:
+        custom_homepage_locale = default_homepage_locale
+
     return render(request, 'contributors/settings.html', {
-        'available_locales': available_locales,
         'selected_locales': selected_locales,
+        'available_locales': available_locales,
+        'locales': all_locales,
+        'locale': custom_homepage_locale,
+        'profile_form': profile_form,
     })
 
 
 @login_required(redirect_field_name='', login_url='/403')
 def notifications(request):
     """View and edit user notifications."""
-    notifications = request.user.notifications.order_by('-pk')
+    notifications = request.user.notifications.prefetch_related('actor', 'target').order_by('-pk')
     projects = {}
 
     for notification in notifications:
@@ -178,7 +210,9 @@ def notifications(request):
 
     # Sort projects by the number of notifications
     ordered_projects = []
-    for slug in sorted(projects, key=lambda slug: len(projects[slug]['notifications']), reverse=True):
+    for slug in sorted(
+        projects, key=lambda slug: len(projects[slug]['notifications']), reverse=True
+    ):
         ordered_projects.append(slug)
 
     return render(request, 'contributors/notifications.html', {
@@ -217,7 +251,10 @@ class ContributorsMixin(object):
             period = None
             start_date = None
 
-        context['contributors'] = User.translators.with_translation_counts(start_date, self.contributors_filter(**kwargs))
+        context['contributors'] = (
+            User.translators
+            .with_translation_counts(start_date, self.contributors_filter(**kwargs))
+        )
         context['period'] = period
         return context
 

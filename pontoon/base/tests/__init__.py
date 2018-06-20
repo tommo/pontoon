@@ -2,7 +2,10 @@ import json
 import os
 import tempfile
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import (
+    Group,
+    User,
+)
 from django.template.defaultfilters import slugify
 from django.test import (
     TestCase as BaseTestCase,
@@ -24,7 +27,6 @@ from pontoon.base.models import (
     Repository,
     Resource,
     TranslatedResource,
-    Subpage,
     Translation,
     TranslationMemoryEntry
 )
@@ -38,9 +40,9 @@ class PontoonClient(BaseClient):
         return self.post(url, params, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 
 
-
 class TestCase(BaseTestCase):
     client_class = PontoonClient
+
     def patch(self, *args, **kwargs):
         """
         Wrapper around mock.patch that automatically cleans up the patch
@@ -66,6 +68,13 @@ class UserFactory(DjangoModelFactory):
 
     class Meta:
         model = User
+
+
+class GroupFactory(DjangoModelFactory):
+    name = Sequence(lambda n: 'group%s' % n)
+
+    class Meta:
+        model = Group
 
 
 class ProjectFactory(DjangoModelFactory):
@@ -113,7 +122,7 @@ class RepositoryFactory(DjangoModelFactory):
 
 class ResourceFactory(DjangoModelFactory):
     project = SubFactory(ProjectFactory)
-    path = '/fake/path.po'
+    path = Sequence(lambda n: '/fake/path{0}.po'.format(n))
     format = 'po'
     total_strings = 1
 
@@ -141,6 +150,7 @@ class PluralEntityFactory(DjangoModelFactory):
     resource = SubFactory(ResourceFactory)
     string = Sequence(lambda n: 'string {0}'.format(n))
     string_plural = Sequence(lambda n: 'string plural {0}'.format(n))
+
     class Meta:
         model = Entity
 
@@ -183,23 +193,6 @@ class TranslatedResourceFactory(DjangoModelFactory):
 
     class Meta:
         model = TranslatedResource
-
-
-class SubpageFactory(DjangoModelFactory):
-    project = SubFactory(ProjectFactory)
-    name = Sequence(lambda n: 'subpage {0}'.format(n))
-
-    class Meta:
-        model = Subpage
-
-    @factory.post_generation
-    def resources(self, create, extracted, **kwargs):
-        if not create:
-            return
-
-        if extracted:
-            for resource in extracted:
-                self.resources.add(resource)
 
 
 def assert_redirects(response, expected_url, status_code=302, host=None, secure=False):

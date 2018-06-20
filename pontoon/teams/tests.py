@@ -51,18 +51,36 @@ class LocaleContributorsTests(ViewTestCase):
         Tests if view returns top contributors specific for given locale.
         """
         first_locale = LocaleFactory.create()
-        first_locale_contributor = TranslationFactory.create(locale=first_locale,
-            entity__resource__project__locales=[first_locale]).user
+        first_locale_contributor = TranslationFactory.create(
+            locale=first_locale,
+            entity__resource__project__locales=[first_locale]
+        ).user
 
         second_locale = LocaleFactory.create()
-        second_locale_contributor = TranslationFactory.create(locale=second_locale,
-            entity__resource__project__locales=[second_locale]).user
+        second_locale_contributor = TranslationFactory.create(
+            locale=second_locale,
+            entity__resource__project__locales=[second_locale]
+        ).user
 
-        with patch.object(views.LocaleContributorsView, 'render_to_response', return_value=HttpResponse('')) as mock_render:
-            self.client.get('/{}/ajax/contributors/'.format(first_locale.code), HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        with patch.object(
+            views.LocaleContributorsView, 'render_to_response', return_value=HttpResponse('')
+        ) as mock_render:
+            self.client.get(
+                '/{}/ajax/contributors/'.format(first_locale.code),
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest'
+            )
             assert_equal(mock_render.call_args[0][0]['locale'], first_locale)
-            assert_equal(list(mock_render.call_args[0][0]['contributors']), [first_locale_contributor])
+            assert_equal(
+                list(mock_render.call_args[0][0]['contributors']),
+                [first_locale_contributor]
+            )
 
-            self.client.get('/{}/ajax/contributors/'.format(second_locale.code), HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+            self.client.get(
+                '/{}/ajax/contributors/'.format(second_locale.code),
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest'
+            )
             assert_equal(mock_render.call_args[0][0]['locale'], second_locale)
-            assert_equal(list(mock_render.call_args[0][0]['contributors']), [second_locale_contributor])
+            assert_equal(
+                list(mock_render.call_args[0][0]['contributors']),
+                [second_locale_contributor]
+            )

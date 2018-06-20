@@ -21,6 +21,7 @@ from pontoon.sync.tests import (
     SyncLogFactory,
 )
 
+
 class SyncProjectTests(TestCase):
     def setUp(self):
         super(SyncProjectTests, self).setUp()
@@ -36,10 +37,15 @@ class SyncProjectTests(TestCase):
 
         self.mock_sync_translations = self.patch('pontoon.sync.tasks.sync_translations')
 
-        self.mock_update_originals = self.patch('pontoon.sync.tasks.update_originals', return_value=[[], [], []])
+        self.mock_update_originals = self.patch(
+            'pontoon.sync.tasks.update_originals',
+            return_value=[[], [], []]
+        )
 
-        self.mock_source_directory_path = self.patch('pontoon.sync.vcs.models.VCSProject.source_directory_path',
-                                                            return_value=self.repository.checkout_path)
+        self.mock_source_directory_path = self.patch(
+            'pontoon.sync.vcs.models.VCSProject.source_directory_path',
+            return_value=self.repository.checkout_path
+        )
 
     def test_missing_project(self):
         """
@@ -75,7 +81,7 @@ class SyncProjectTests(TestCase):
         sync_project(self.db_project.pk, self.sync_log.pk)
         assert_false(self.mock_update_originals.called)
         mock_log.info.assert_called_with(
-            CONTAINS('Skipping syncing resources', self.db_project.slug)
+            CONTAINS('Skipping syncing sources', self.db_project.slug)
         )
 
     def test_no_changes_skip(self):
@@ -150,7 +156,8 @@ class SyncTranslationsTests(FakeCheckoutTestCase):
             self.repository.pk: Locale.objects.filter(pk=self.translated_locale.pk)
         }]
 
-        changed1, changed2, changed_after = ChangedEntityLocaleFactory.create_batch(3,
+        changed1, changed2, changed_after = ChangedEntityLocaleFactory.create_batch(
+            3,
             locale=self.translated_locale,
             entity__resource=self.main_db_resource,
             when=aware_datetime(1970, 1, 1)

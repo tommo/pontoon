@@ -3,8 +3,8 @@ from __future__ import absolute_import  # Same name as silme library.
 Parser for silme-compatible translation formats.
 """
 import codecs
-import os
 import silme
+from six import text_type
 
 from collections import OrderedDict
 from copy import copy
@@ -15,6 +15,12 @@ from silme.format.inc import FormatParser as IncParser
 from silme.format.properties import FormatParser as PropertiesParser
 
 from pontoon.sync import SyncError
+from pontoon.sync.utils import (
+    create_parent_directory,
+    escape_quotes,
+    unescape_quotes,
+)
+
 from pontoon.sync.formats.base import ParsedResource
 from pontoon.sync.vcs.models import VCSTranslation
 
@@ -109,7 +115,7 @@ class SilmeResource(ParsedResource):
             if isinstance(obj, silme.core.entity.Entity):
 
                 if self.escape_quotes_on:
-                    obj.value = self.unescape_quotes(obj.value)
+                    obj.value = unescape_quotes(obj.value)
 
                 entity = SilmeEntity(obj, comments, current_order)
                 self.entities[entity.key] = entity
@@ -119,28 +125,12 @@ class SilmeResource(ParsedResource):
                 for comment in obj:
                     # Silme groups comments together, so we strip
                     # whitespace and split them up.
-                    lines = unicode(comment).strip().split('\n')
+                    lines = text_type(comment).strip().split('\n')
                     comments += [line.strip() for line in lines]
 
     @property
     def translations(self):
         return self.entities.values()
-
-    def escape_quotes(self, value):
-        """
-        DTD files can use single or double quotes for identifying strings,
-        so &quot; and &apos; are the safe bet that will work in both cases.
-        """
-        value = value.replace('"', '\\&quot;')
-        value = value.replace("'", '\\&apos;')
-        return value
-
-    def unescape_quotes(self, value):
-        value = value.replace('\\&quot;', '"')
-        value = value.replace('\\"', '"')
-        value = value.replace('\\&apos;', "'")
-        value = value.replace("\\'", "'")
-        return value
 
     def save(self, locale):
         """
@@ -171,7 +161,7 @@ class SilmeResource(ParsedResource):
                 translation = translated_entity.strings[None]
 
                 if self.escape_quotes_on:
-                    translation = self.escape_quotes(translation)
+                    translation = escape_quotes(translation)
 
                 new_structure.modify_entity(key, translation)
             else:
@@ -185,26 +175,25 @@ class SilmeResource(ParsedResource):
                     # No newline at end of file
                     continue
 
-                if type(line) == unicode and line.startswith('\n'):
+                if type(line) == text_type and line.startswith('\n'):
                     line = line[len('\n'):]
                     new_structure[pos] = line
                     if len(line) is 0:
                         new_structure.remove_element(pos)
 
         # Temporary fix for bug 1236281 until bug 721211 lands
-        if self.path.endswith('browser/chrome/browser/browser.properties') and locale.code == 'zh-CN':
+        if (
+            self.path.endswith('browser/chrome/browser/browser.properties') and
+            locale.code == 'zh-CN'
+        ):
             new_entity = silme.core.entity.Entity(
                 'browser.startup.homepage',
-                'http://start.firefoxchina.cn'
+                'https://start.firefoxchina.cn'
             )
             new_structure.add_entity(new_entity)
             new_structure.add_string('\n')
 
-        # Create parent directory if it doesn't exist.
-        try:
-            os.makedirs(os.path.dirname(self.path))
-        except OSError:
-            pass  # Already exists, phew!
+        create_parent_directory(self.path)
 
         with codecs.open(self.path, 'w', 'utf-8') as f:
             f.write(self.parser.dump_structure(new_structure))

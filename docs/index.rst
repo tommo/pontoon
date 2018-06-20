@@ -29,7 +29,10 @@ Contents
    :maxdepth: 2
 
    dev/install
-   dev/workflow
+   dev/install-docker
+   dev/contributing
    dev/sync
+   dev/api
+   dev/browser-support
    admin/deployment
    admin/maintenance

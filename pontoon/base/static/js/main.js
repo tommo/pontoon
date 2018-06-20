@@ -31,6 +31,18 @@ var Pontoon = (function (my) {
     },
 
     /*
+     * Remove duplicate items from the array of numeric values
+     *
+     * TODO: Switch to ES6 and replace with Set
+     */
+    removeDuplicates: function (array) {
+      var seen = {};
+      return array.filter(function(item) {
+        return seen.hasOwnProperty(item) ? false : (seen[item] = true);
+      });
+    },
+
+    /*
      * Mark all notifications as read and update UI accordingly
      */
     markAllNotificationsAsRead: function () {
@@ -40,7 +52,7 @@ var Pontoon = (function (my) {
         url: '/notifications/mark-all-as-read/',
         success: function() {
           $('#notifications.unread .button .icon').animate({color: '#4D5967'}, 1000);
-          var unreadNotifications = $('#main.notifications .right-column li.notification-item[data-unread="true"]');
+          var unreadNotifications = $('.notifications .menu ul.notification-list li.notification-item[data-unread="true"]');
 
           unreadNotifications.animate({backgroundColor: 'transparent'}, 1000, function() {
             // Remove inline style and unread mark to make hover work again
@@ -136,25 +148,73 @@ var Pontoon = (function (my) {
     },
 
     /*
+     * Markup XML Tags
+     *
+     * Find any XML Tags in a string and mark them up, while making sure
+     * the rest of the text in a string is displayed not rendered.
+     */
+    markXMLTags: function (string) {
+      var self = this;
+
+      var markedString = '';
+      var startMarker = '<mark class="placeable" title="XML Tag">';
+      var endMarker = '</mark>';
+
+      var re = /(<[^(><.)]+>)/gi;
+      var results;
+      var previousIndex = 0;
+
+      function doNotRenderSubstring(start, end) {
+        return self.doNotRender(string.substring(start, end));
+      }
+
+      // Find successive matches
+      while ((results = re.exec(string)) !== null) {
+        markedString += (
+          // Substring between the previous and the current tag: do not render
+          doNotRenderSubstring(previousIndex, results.index) +
+
+          // Tag: do not render and wrap in markup
+          startMarker + doNotRenderSubstring(results.index, re.lastIndex) + endMarker
+        );
+        previousIndex = re.lastIndex;
+      }
+
+      // Substring between the last tag and the end of the string: do not render
+      markedString += doNotRenderSubstring(previousIndex, string.length);
+
+      return markedString;
+    },
+
+    /*
+     * Get markup for a placeable instance.
+     */
+    getPlaceableMarkup: function (title, replacement) {
+        return '<mark class="placeable" title="' + title + '">' + replacement + '</mark>';
+    },
+
+    /*
+     * Mark single instance of a placeable in string
+     */
+    markPlaceable: function(string, regex, title, replacement) {
+      replacement = replacement || '$&';
+      return string.replace(regex, this.getPlaceableMarkup(title, replacement));
+    },
+
+    /*
      * Markup placeables
      */
-    markPlaceables: function (string) {
-      function getReplacement(title, replacement) {
-        return '<mark class="placeable" title="' + title + '">' + replacement + '</mark>';
-      }
+    markPlaceables: function (string, whiteSpaces) {
+      var self = this;
+      whiteSpaces = whiteSpaces !== false;
 
-      function markup(string, regex, title, replacement) {
-        replacement = replacement || '$&';
-        return string.replace(regex, getReplacement(title, replacement));
-      }
-
-      string = this.doNotRender(string);
+      string = self.doNotRender(string);
 
       /* Special spaces */
       // Pontoon.doNotRender() replaces \u00A0 with &nbsp;
-      string = markup(string, /&nbsp;/gi, 'Non-breaking space');
-      string = markup(string, /[\u202F]/gi, 'Narrow non-breaking space');
-      string = markup(string, /[\u2009]/gi, 'Thin space');
+      string = self.markPlaceable(string, /&nbsp;/gi, 'Non-breaking space');
+      string = self.markPlaceable(string, /[\u202F]/gi, 'Narrow non-breaking space');
+      string = self.markPlaceable(string, /[\u2009]/gi, 'Thin space');
 
       /* Multiple spaces */
       string = string.replace(/  +/gi, function(match) {
@@ -164,20 +224,40 @@ var Pontoon = (function (my) {
         for (var i=0; i<match.length; i++) {
           replacement += ' &middot; ';
         }
-
-        return getReplacement(title, replacement);
+        return self.getPlaceableMarkup(title, replacement);
       });
 
-      /* Leading and Trailing spaces */
-      string = markup(string, /^ /gi, 'Leading space');
-      string = markup(string, / $/gi, 'Trailing space');
+      if (whiteSpaces) {
+        string = self.markWhiteSpaces(string);
+      }
 
-      /* Tab */
-      string = markup(string, /\t/gi, 'Tab character', '&rarr;');
+      return string;
+    },
+
+    /*
+     * Mark leading/trailing spaces in multiline strings (that contain newlines inside).
+     * Should be applied to a fully concatenated string, doesn't handle substrings well.
+     */
+    markWhiteSpaces: function (string) {
+      /* 'm' modifier makes regex applicable to every separate line in string, not the string as the whole. */
+
+      /* Leading space */
+      string = string.replace(
+        /^(<(ins|del)>)*( )/gmi,
+        '$1' + this.getPlaceableMarkup('Leading space', ' ')
+      );
+
+      /* Trailing space */
+      string = string.replace(
+        /( )(<\/(ins|del)>)*$/gmi,
+        this.getPlaceableMarkup('Trailing space', ' ') + '$2'
+      );
 
       /* Newline */
-      string = markup(string, /\n/gi, 'Newline character', '¶$&');
+      string = this.markPlaceable(string, /\n/gi, 'Newline character', '¶$&');
 
+      /* Tab */
+      string = this.markPlaceable(string, /\t/gi, 'Tab character', '&rarr;');
       return string;
     },
 
@@ -196,23 +276,23 @@ var Pontoon = (function (my) {
         var type = this[0],
             slice = this[1];
 
-        // Inserted
-        if (type === 1) {
-          output += '<ins>' + self.markPlaceables(slice) + '</ins>';
-        }
+        switch(type) {
+          case DIFF_INSERT:
+            output += '<ins>' + self.markPlaceables(slice, false) + '</ins>';
+            break;
 
-        // Deleted
-        if (type === -1) {
-          output += '<del>' + self.markPlaceables(slice) + '</del>';
-        }
+          case DIFF_DELETE:
+            output += '<del>' + self.markPlaceables(slice, false) + '</del>';
+            break;
 
-        // Equal
-        if (type === 0) {
-          output += self.markPlaceables(slice);
+          case DIFF_EQUAL:
+            output += self.markPlaceables(slice, false);
+            break;
         }
       });
 
-      return output;
+      /* Marking of leading/trailing spaces has to be the last step to avoid false positives. */
+      return self.markWhiteSpaces(output);
     },
 
     /*
@@ -220,16 +300,18 @@ var Pontoon = (function (my) {
      *
      * Matches the URL Regex and parses the required matches.
      * Can find more than one URL in the given string.
+     *
+     * Escapes HTML tags.
      */
     linkify: function (string) {
       // http://, https://, ftp://
-      var urlPattern = /\b(?:https?|ftp):\/\/[a-z0-9-+&@#\/%?=~_|!:,.;]*[a-z0-9-+&@#\/%=~_|]/gim;
+      var urlPattern = /\b(?:https?|ftp):\/\/[a-z0-9-+&@#/%?=~_|!:,.;]*[a-z0-9-+&@#/%=~_|]/gim;
       // www. sans http:// or https://
-      var pseudoUrlPattern = /(^|[^\/])(www\.[\S]+(\b|$))/gim;
+      var pseudoUrlPattern = /(^|[^/])(www\.[\S]+(\b|$))/gim;
 
       return this.doNotRender(string)
-        .replace(urlPattern, '<a href="$&" target="_blank">$&</a>')
-        .replace(pseudoUrlPattern, '$1<a href="http://$2" target="_blank">$2</a>');
+        .replace(urlPattern, '<a href="$&" target="_blank" rel="noopener noreferrer">$&</a>')
+        .replace(pseudoUrlPattern, '$1<a href="http://$2" target="_blank" rel="noopener noreferrer">$2</a>');
     },
 
     /*
@@ -249,50 +331,75 @@ var Pontoon = (function (my) {
      * Get suggestions from machine translation and translation memory
      *
      * original Original string
-     * target Target element id
+     * customSearch Instead of source string, use custom search keyword as input
      * loader Loader element id
      */
-    getMachinery: function (original, target, loader) {
+    getMachinery: function (original, customSearch, loader) {
+      loader = loader || 'helpers li a[href="#machinery"]';
       var self = this,
-          loader = loader || 'helpers li a[href="#machinery"]',
           ul = $('#helpers > .machinery').children('ul').empty(),
-          tab = $('#' + loader).addClass('loading'),
+          tab = $('#' + loader).addClass('loading'), // .loading class used on the /machinery page
           requests = 0,
           count = 0,
-          sourcesMap = {};
+          sourcesMap = {},
+          originalForTM = original;
+
+      // We store TranslationMemoryEntries of FTL Translation objects as source FTL,
+      // so we should query them as such as well (instead of simplified strings).
+      if (!customSearch) {
+        var entity = self.getEditorEntity();
+        originalForTM = entity['original' + self.getPluralSuffix()];
+      }
+
+      self.NProgressUnbind();
 
       function append(data) {
         var title = loader !== 'search' ? ' title="Copy Into Translation (Tab)"' : ' title="Copy to clipboard"',
             sources = sourcesMap[data.original + data.translation],
-            occurrencesTitle = 'Number of translation occurrences';
+            occurrencesTitle = 'Number of translation occurrences',
+            originalText = data.original,
+            translationText = data.translation;
 
         if (sources) {
           sources.append(
-            '<li><a class="translation-source" href="' + data.url + '" target="_blank" title="' + data.title + '">' +
+            '<li><a class="translation-source" href="' + data.url + '" target="_blank" rel="noopener noreferrer" title="' + data.title + '">' +
               '<span>' + data.source + '</span>' +
               (data.count ? '<sup title="' + occurrencesTitle + '">' + data.count  + '</sup>' : '') +
             '</a></li>'
           );
 
         } else {
-          var li = $('<li class="suggestion"' + title + ' data-clipboard-text="' + self.doNotRender(data.translation) + '">' +
+          if (data.source !== 'Caighdean') {
+            var originalTextForDiff = originalText;
+
+            // We store TranslationMemoryEntries of FTL Translation objects as source FTL,
+            // so in we need to convert returned original and translation to simple string.
+            // See bug 1455191.
+            if (!customSearch && data.source === 'Translation memory') {
+              originalTextForDiff = self.fluent.getSimplePreview(originalText);
+              translationText = self.fluent.getSimplePreview(translationText);
+            }
+
+            originalText = (originalText ? self.diff(original, originalTextForDiff) : '');
+          }
+          var li = $('<li class="suggestion"' + title + ' data-clipboard-text="' + self.doNotRender(translationText) + '">' +
             '<header>' +
               (data.quality ? '<span class="stress">' + data.quality + '</span>' : '') +
               '<ul class="sources">' +
                 '<li data-source="' + data.source + '">' +
-                  '<a class="translation-source" href="' + data.url + '" target="_blank" title="' + data.title + '">' +
+                  '<a class="translation-source" href="' + data.url + '" target="_blank" rel="noopener noreferrer" title="' + data.title + '">' +
                     '<span>' + data.source + '</span>' +
                     (data.count ? '<sup title="' + occurrencesTitle + '">' + data.count + '</sup>' : '') +
                   '</a>' +
                 '</li>' +
               '</ul>' +
             '</header>' +
-            '<p class="original">' + (data.original ? self.diff(original, data.original) : '') + '</p>' +
+            '<p class="original">' + originalText + '</p>' +
             '<p class="translation" dir="' + self.locale.direction + '" lang="' + self.locale.code + '" data-script="' + self.locale.script + '">' +
-              self.markPlaceables(data.translation) +
+              self.markPlaceables(translationText) +
             '</p>' +
             '<p class="translation-clipboard">' +
-              self.doNotRender(data.translation) +
+              self.doNotRender(translationText) +
             '</p>' +
           '</li>');
           ul.append(li);
@@ -336,7 +443,7 @@ var Pontoon = (function (my) {
         ul.html(listitems);
 
         // Sort sources inside results.
-        ul.find('.sources').each(function (index) {
+        ul.find('.sources').each(function () {
           var $sourcesList = $(this),
               sources = $sourcesList.children('li'),
               sortedItems = sources.sort(function(a, b) {
@@ -366,10 +473,11 @@ var Pontoon = (function (my) {
       function complete(jqXHR, status) {
         if (status !== "abort") {
           requests--;
-          tab.find('.count').html(count).toggle(count !== 0);
+          tab.find('.count').html(count).show();
           if (requests === 0) {
             tab.removeClass('loading');
             if (ul.children('li').length === 0) {
+              tab.find('.count').hide();
               ul.append('<li class="disabled">' +
                 '<p>No translations available.</p>' +
               '</li>');
@@ -377,9 +485,6 @@ var Pontoon = (function (my) {
           }
         }
       }
-
-      // Reset count
-      tab.find('.count').html('').hide();
 
       // Translation memory
       requests++;
@@ -391,9 +496,9 @@ var Pontoon = (function (my) {
       self.XHRtranslationMemory = $.ajax({
         url: '/translation-memory/',
         data: {
-          text: original,
+          text: originalForTM,
           locale: self.locale.code,
-          pk: !target ? $('#editor')[0].entity.pk : ''
+          pk: !customSearch ? $('#editor')[0].entity.pk : ''
         }
 
       }).success(function(data) {
@@ -413,7 +518,7 @@ var Pontoon = (function (my) {
       }).error(error).complete(complete);
 
       // Machine translation
-      if (self.locale.mt !== false) {
+      if (self.locale.ms_translator_code.length) {
         requests++;
 
         if (self.XHRmachineTranslation) {
@@ -424,17 +529,9 @@ var Pontoon = (function (my) {
           url: '/machine-translation/',
           data: {
             text: original,
-            // On first run, check if target locale supported
-            check: (self.locale.mt === undefined) ? true : false,
-            // Use MT locale, Pontoon's might not be supported
-            locale: (self.locale.mt === undefined) ?
-                    self.locale.code : self.locale.mt
+            locale: self.locale.ms_translator_code
           }
-
         }).success(function(data) {
-          if (data.locale) {
-            self.locale.mt = data.locale;
-          }
           if (data.translation) {
             append({
               url: 'http://www.bing.com/translator',
@@ -442,14 +539,12 @@ var Pontoon = (function (my) {
               source: 'Machine Translation',
               translation: data.translation
             });
-          } else if (data === "not-supported") {
-            self.locale.mt = false;
           }
         }).error(error).complete(complete);
       }
 
       // Microsoft Terminology
-      if (self.locale.msTerminology !== false) {
+      if (self.locale.ms_terminology_code.length) {
         requests++;
 
         if (self.XHRmicrosoftTerminology) {
@@ -460,96 +555,86 @@ var Pontoon = (function (my) {
           url: '/microsoft-terminology/',
           data: {
             text: original,
-            // On first run, check if target locale supported
-            check: (self.locale.msTerminology === undefined) ? true : false,
-            // Use Microsoft Terminology locale, Pontoon's might not be supported
-            locale: (self.locale.msTerminology === undefined) ?
-                    self.locale.code : self.locale.msTerminology
+            locale: self.locale.ms_terminology_code
           }
 
         }).success(function(data) {
-          if (data.locale) {
-            self.locale.msTerminology = data.locale;
+          $.each(data.translations, function() {
+            append({
+              original: this.source,
+              quality: Math.round(this.quality) + '%',
+              url: 'https://www.microsoft.com/Language/en-US/Search.aspx?sString=' + this.source + '&langID=' + self.locale.ms_terminology_code,
+              title: 'Visit Microsoft Terminology Service API.\n' +
+                     '© 2018 Microsoft Corporation. All rights reserved.',
+              source: 'Microsoft',
+              translation: this.target
+            });
+          });
+        }).error(error).complete(complete);
+      }
+
+      // Transvision
+      if (self.locale.transvision) {
+        requests++;
+
+        if (self.XHRtransvision) {
+          self.XHRtransvision.abort();
+        }
+
+        self.XHRtransvision = $.ajax({
+          url: '/transvision/',
+          data: {
+            text: original,
+            locale: self.locale.code
           }
-          if (data.translations) {
-            $.each(data.translations, function() {
+
+        }).success(function(data) {
+          if (data) {
+            $.each(data, function() {
               append({
                 original: this.source,
                 quality: Math.round(this.quality) + '%',
-                url: 'https://www.microsoft.com/Language/en-US/Search.aspx?sString=' + this.source + '&langID=' + self.locale.msTerminology,
-                title: 'Visit Microsoft Terminology Service API.\n' +
-                       '© 2014 Microsoft Corporation. All rights reserved.',
-                source: 'Microsoft',
+                url: 'https://transvision.mozfr.org/?repo=global' +
+                     '&recherche=' + encodeURIComponent(original) +
+                     '&locale=' + self.locale.code,
+                title: 'Visit Transvision',
+                source: 'Mozilla',
                 translation: this.target
               });
             });
-          } else if (data === "not-supported") {
-            self.locale.msTerminology = false;
           }
         }).error(error).complete(complete);
       }
 
-      // amaGama
-      requests++;
+      // Machine translation (Caighdean)
+      if (self.locale.code === 'ga-IE') {
+        requests++;
 
-      if (self.XHRamagama) {
-        self.XHRamagama.abort();
+        if (self.XHRCaighdeanMT) {
+          self.XHRCaighdeanMT.abort();
+        }
+
+        self.XHRCaighdeanMT = $.ajax({
+          url: '/machine-translation-caighdean/',
+          data: {
+            id: entity.pk,
+            locale: self.locale.code
+          }
+        }).success(function(data) {
+          if (data.translation) {
+            append({
+              url: 'https://github.com/kscanne/caighdean',
+              title: 'Visit Caighdean Machine Translation',
+              source: 'Caighdean',
+              original: data.original,
+              translation: data.translation
+            });
+          }
+        }).error(error).complete(complete);
       }
 
-      self.XHRamagama = $.ajax({
-        url: '/amagama/',
-        data: {
-          text: original,
-          locale: self.locale.code
-        }
-
-      }).success(function(data) {
-        if (data) {
-          $.each(data, function() {
-            append({
-              original: this.source,
-              quality: Math.round(this.quality) + '%',
-              url: 'http://amagama.translatehouse.org/',
-              title: 'Visit amaGama',
-              source: 'Open Source',
-              translation: this.target
-            });
-          });
-        }
-      }).error(error).complete(complete);
-
-      // Transvision
-      requests++;
-
-      if (self.XHRtransvision) {
-        self.XHRtransvision.abort();
-      }
-
-      self.XHRtransvision = $.ajax({
-        url: '/transvision/',
-        data: {
-          text: original,
-          locale: self.locale.code
-        }
-
-      }).success(function(data) {
-        if (data) {
-          $.each(data, function() {
-            append({
-              original: this.source,
-              quality: Math.round(this.quality) + '%',
-              url: 'https://transvision.mozfr.org/?repo=global' +
-                   '&recherche=' + encodeURIComponent(original) +
-                   '&locale=' + self.locale.code,
-              title: 'Visit Transvision',
-              source: 'Mozilla',
-              translation: this.target
-            });
-          });
-        }
-      }).error(error).complete(complete);
+      self.NProgressBind();
     }
-
   });
 }(Pontoon || {}));
 
@@ -557,6 +642,24 @@ var Pontoon = (function (my) {
 
 /* Main code */
 $(function() {
+  /*
+   * If Google Analytics is enabled, frontend will send additional about Ajax calls.
+   *
+   * To send an event to GA, We pass following informations:
+   * event category - hardcoded 'ajax' string.
+   * event action - hardcoded 'request' string.
+   * event label - contains url that was called by $.ajax() call.
+   *
+   * GA Analytics enriches every event with additional information like e.g. browser, resolution, country etc.
+   */
+  $(document).ajaxComplete(function(event, jqXHR, settings) {
+      if (typeof(ga) !== 'function') {
+        return;
+      }
+
+      ga('send', 'event', 'ajax', 'request', settings.url);
+  });
+
   Pontoon.NProgressBind();
 
   // Display any notifications
@@ -570,7 +673,7 @@ $(function() {
   }
 
   // Sign in button action
-  $('#fxa-sign-in, #standalone-signin a, #sidebar-signin').on('click', function(ev) {
+  $('#fxa-sign-in, #standalone-signin a, #sidebar-signin').on('click', function() {
     var $this = $(this);
     var loginUrl = $this.prop('href'),
         startSign = loginUrl.match(/\?/) ? '&': '?';
@@ -602,7 +705,7 @@ $(function() {
   });
 
   // Hide menus on click outside
-  $('body').bind('click.main', function (e) {
+  $('body').bind('click.main', function () {
     $('.menu:not(".permanent")').hide();
     $('.select').removeClass('opened');
     $('.menu:not(".permanent") li').removeClass('hover');
@@ -763,7 +866,7 @@ $(function() {
               attribute: 'forceSuggestions',
               value: is_enabled
             });
-            $('[id^="save"]').toggleClass('suggest', is_enabled);
+            Pontoon.updateSaveButtons();
           }
         }
       },

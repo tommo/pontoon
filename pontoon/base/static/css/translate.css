@@ -16,11 +16,13 @@ body {
 
 #overlay img {
   position: absolute;
-  height: 90%;
-  top: 5%;
+  max-height: 90%;
+  top: 0;
   left: 0;
   right: 0;
-  margin: 0 auto;
+  bottom: 0;
+  margin: auto;
+  max-width: 90%;
 }
 
 mark.placeable {
@@ -43,6 +45,7 @@ mark.search {
 
 #source {
   display: none;
+  background: #FFFFFF;
   height: 0;
   padding: 60px 0 0 0;
   width: 100%;
@@ -259,7 +262,14 @@ body > header .locale.select {
   padding: 2px 4px;
 }
 
+.menu .static-links .internal {
+  border-bottom: 1px solid #5E6475;
+  margin-bottom: 5px;
+  padding-bottom: 5px;
+}
+
 .menu ul li.current,
+.menu .static-links .all-projects.current,
 .menu .static-links .all-resources.current {
   color: #7BC876;
 }
@@ -292,7 +302,10 @@ body > header .locale.select {
 #filter .missing:not(.hover) .status:before,
 #entitylist .wrapper .selected.missing .status:before,
 #entitylist .wrapper .hovered.missing .status:before,
-#entitylist .wrapper li:hover.missing .status:before {
+#entitylist .wrapper li:hover.missing .status:before,
+#entitylist .wrapper .selected.partial .status:before,
+#entitylist .wrapper .hovered.partial .status:before,
+#entitylist .wrapper li:hover.partial .status:before {
   color: #3F4752;
 }
 
@@ -316,6 +329,11 @@ body > header .locale.select {
 .has-suggestions .status:before {
   color: #AAAAAA;
   content: "";
+}
+
+.rejected .status:before {
+  color: #AAAAAA;
+  content: "";
 }
 
 .time-range .status:before {
@@ -690,6 +708,12 @@ body > header aside p {
   display: none;
 }
 
+[class^="tag-"] .status.fa:before,
+[class*=" tag-"] .status.fa:before {
+  content: "";
+  color: #aaa;
+}
+
 #filter .menu li.time-range {
   display: none;
   padding: 4px 0;
@@ -1002,10 +1026,22 @@ body > header aside p {
   content: "";
 }
 
-#filter .menu li .count {
+#filter .menu li .count,
+#filter .menu li .priority {
   position: absolute;
   right: 4px;
+}
+
+#filter .menu li .count {
   top: 4px;
+}
+
+#filter .menu li .priority {
+  top: 6px;
+}
+
+#filter .menu li .priority .fa-star {
+  float: left;
 }
 
 #filter .menu li.author .count {
@@ -1198,7 +1234,9 @@ body > header aside p {
 
 #editor p#original,
 #editor p.original,
-#editor p.translation {
+#ftl-original .main-value li,
+#editor p.translation,
+#editor p.translation-diff {
   text-align: start;
   white-space: pre-wrap;
 }
@@ -1310,11 +1348,11 @@ body > header aside p {
   text-align: left;
 }
 
-#source-pane #original mark.placeable {
+#source-pane mark.placeable {
   cursor: pointer;
 }
 
-#source-pane #original mark.placeable:hover {
+#source-pane mark.placeable:hover {
   color: #7BC876;
 }
 
@@ -1349,24 +1387,9 @@ body > header aside p {
   color: #CCCCCC;
 }
 
-#editor nav li a > span > .fa {
-  left: 0;
-  position: absolute;
-  right: 0;
-  top: 2px;
-  vertical-align: 0;
-  /* Bug 1312228: Stop tab loading animations when not needed to avoid high CPU usage */
-  display: none;
-  visibility: hidden;
-}
-
-#editor nav li a.loading > span > .fa {
-  display: block;
-  visibility: visible;
-}
-
 #editor nav li a > span > .count {
   background: #3F4752;
+  display: none;
   margin-left: 0;
 }
 
@@ -1379,26 +1402,12 @@ body > header aside p {
   color: #7BC876;
 }
 
-#editor nav li a > span {
-  position: relative;
-}
-
-#editor nav li a.loading > span {
-  visibility: hidden;
-}
-
-#editor nav li a.loading[href="#machinery"] span.count {
-  visibility: visible;
-}
-
 #editor textarea {
   background: #FFFFFF;
   color: #222222;
   display: block;
   font-size: 13px;
-  height: 20%;
   line-height: 22px;
-  min-height: 100px;
   overflow: auto;
   padding: 10px;
   width: 100%;
@@ -1409,6 +1418,22 @@ body > header aside p {
 
 #editor textarea[data-script="Arabic"] {
   font-size: 15px;
+}
+
+#editor #translation {
+  height: 20%;
+  min-height: 100px;
+}
+
+#ftl-area {
+  position: relative;
+}
+
+#ftl-area #only-value {
+  height: 100%;
+  left: 0;
+  position: absolute;
+  top: 0;
 }
 
 .ftl-area {
@@ -1457,12 +1482,12 @@ body > header aside p {
 }
 
 .ftl-area section .id {
-  font-weight: 300;
   border: 1px solid #5E6475;
   background: transparent;
-  color: #FFFFFF;
+  color: #AAAAAA;
   display: inline-block;
   font-weight: normal;
+  float: left;
   margin: 2px 5px 2px 0;
   padding: 0 4px;
   position: relative;
@@ -1470,11 +1495,6 @@ body > header aside p {
 
   -moz-box-sizing: border-box;
   box-sizing: border-box;
-}
-
-.ftl-area section .id.built-in,
-.ftl-area .main-value .id {
-  color: #AAAAAA;
 }
 
 .ftl-area section .id .stress {
@@ -1513,11 +1533,17 @@ body > header aside p {
   padding: 0;
 }
 
-.ftl-area .attributes .value#accesskey {
+#editor .ftl-area textarea.value {
+  height: 24px;
+  padding: 0 4px;
+  width: 75%;
+}
+
+.ftl-area .attributes .value#ftl-id-accesskey {
   margin-right: 3px;
   padding: 0 4px;
+  resize: none;
   text-align: center;
-  text-transform: uppercase;
   width: 24px;
 }
 
@@ -1602,6 +1628,7 @@ body > header aside p {
 
 .warning-overlay {
   background: #272A2F;
+  border-top: 1px solid #5E6475;
   bottom: 0;
   display: none;
   left: 0;
@@ -1631,11 +1658,6 @@ body > header aside p {
   color: #F36;
 }
 
-.warning-overlay ul {
-  float: left;
-  list-style: disc;
-}
-
 .warning-overlay #save-anyway,
 .warning-overlay #leave-anyway {
   bottom: 10px;
@@ -1643,8 +1665,36 @@ body > header aside p {
   right: 10px;
 }
 
+#unsaved p {
+  font-style: italic;
+}
+
+#quality ul {
+  font-style: italic;
+  list-style: none;
+  margin: 0px;
+  width: calc(100% - 140px);
+}
+
+#quality ul i {
+  font-size: 18px;
+  margin: 0px 8px;
+  vertical-align: text-bottom;
+}
+
+#quality .warning {
+  color: #AAAAAA;
+}
+
+#quality .warning i {
+  color: #4D5967;
+}
+
+#quality .error i {
+  color: #F36;
+}
+
 #editor #single #ftl {
-  display: none; /* TODO: Remove once source view support is implemented */
   color: #AAAAAA;
   float: left;
   font-size: 18px;
@@ -1781,6 +1831,14 @@ body > header aside p {
   content: "Suggest anyway";
 }
 
+#editor #single > menu button#save-anyway.suggest.approve {
+  background: #7BC876;
+}
+
+#save-anyway.approve:before {
+  content: "Approve anyway";
+}
+
 p#sign-in-required {
   font-style: italic;
 }
@@ -1847,11 +1905,6 @@ p#sign-in-required > a#sidebar-signin {
   transition: all 0.1s ease-out;
 }
 
-#helpers > section ul li.delete {
-  -webkit-transform: scale(0); /* MANDATORY! Or transitionend in main.js triggered too late */
-  transform: scale(0);
-}
-
 #helpers > section ul li:not(.disabled):hover,
 #helpers > section ul li:not(.disabled).hover {
   background: #4D5967;
@@ -1900,21 +1953,23 @@ p#sign-in-required > a#sidebar-signin {
 }
 
 #helpers > section ul li > header.translator button,
-#helpers > section ul li > header.own button.delete,
+#helpers > section ul li > header.own button.reject,
+#helpers > section ul li > header.own button.unreject,
 #helpers > section ul li.translated > header button.approve {
   display: inline-block;
 }
 
-#helpers > section ul li > header button.approve:before {
-  content: "";
+#helpers > section ul li.rejected {
+  opacity: 0.4;
+}
+
+#helpers > section ul li.rejected:hover,
+#helpers > section ul li.rejected.hover {
+  opacity: 1;
 }
 
 #helpers > section ul li.fuzzy > header button.approve:before {
   color: #FED271;
-}
-
-#helpers > section ul li.suggested > header button.approve:before {
-  color: #4FC4F6;
 }
 
 #helpers > section ul li > header button.approve:hover:before,
@@ -1926,17 +1981,24 @@ p#sign-in-required > a#sidebar-signin {
 
 #helpers > section ul li > header button.approve:before,
 #helpers > section ul li > header button.unapprove:hover:before {
-   content: "";
-   color: #4FC4F6;
+   content: "";
 }
 
-#helpers > section ul li > header button.delete:before {
-  content: "";
+#helpers > section ul li > header button.unreject:before,
+#helpers > section ul li > header button.reject:hover:before,
+#helpers > section ul li.rejected > header button.reject:before,
+#helpers > section ul li.rejected > header button.unreject:before {
+  color: #F36;
+  content: "";
   margin-left: 5px;
 }
 
-#helpers > section ul li > header button.delete:hover:before {
-  color: #F36;
+#helpers > section ul li > header button.reject:before,
+#helpers > section ul li > header button.unreject:hover:before,
+#helpers > section ul li.rejected > header button.reject:hover:before,
+#helpers > section ul li.rejected > header button.unreject:hover:before {
+  content: "";
+  margin-left: 5px;
 }
 
 
@@ -2059,7 +2121,7 @@ p#sign-in-required > a#sidebar-signin {
   display: none;
 }
 
-#batch button#delete-all {
+#batch button#reject-all {
   background: #F36;
 }
 

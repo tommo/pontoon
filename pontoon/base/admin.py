@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import (
     UserAdmin as AuthUserAdmin,
     GroupAdmin,
@@ -6,8 +7,14 @@ from django.contrib.auth.admin import (
 from django.contrib.auth.models import User, Group
 from django.forms.models import ModelForm
 from django.forms import ChoiceField
+from django.urls import reverse
 
 from pontoon.base import models
+from pontoon.base import utils
+
+from pontoon.teams.utils import (
+    log_user_groups,
+)
 
 
 AGGREGATED_STATS_FIELDS = (
@@ -22,7 +29,7 @@ class UserProfileInline(admin.StackedInline):
     model = models.UserProfile
     max_num = 1
     can_delete = False
-    fields = ('quality_checks', 'force_suggestions',)
+    exclude = ('locales_order',)
     verbose_name_plural = 'Settings'
 
 
@@ -31,6 +38,23 @@ class UserAdmin(AuthUserAdmin):
     list_display = ('email', 'first_name', 'last_login', 'date_joined')
     list_filter = ('is_staff', 'is_superuser')
     inlines = (UserProfileInline,)
+
+    def save_model(self, request, obj, form, change):
+        """
+        Save a user and log changes in its roles.
+        """
+        add_groups, remove_groups = utils.get_m2m_changes(
+            obj.groups,
+            form.cleaned_data['groups']
+        )
+
+        super(UserAdmin, self).save_model(request, obj, form, change)
+
+        log_user_groups(
+            request.user,
+            obj,
+            (add_groups, remove_groups)
+        )
 
 
 class ExternalResourceInline(admin.TabularInline):
@@ -68,7 +92,9 @@ class LocaleAdminForm(ModelForm):
     def __init__(self, *args, **kwargs):
         super(LocaleAdminForm, self).__init__(*args, **kwargs)
         self.fields['db_collation'].choices = self.db_collations_choices
-        self.fields['db_collation'].help_text = self._meta.model._meta.get_field('db_collation').help_text
+        self.fields['db_collation'].help_text = (
+            self._meta.model._meta.get_field('db_collation').help_text
+        )
 
 
 class LocaleAdmin(admin.ModelAdmin):
@@ -96,7 +122,8 @@ class RepositoryInline(admin.TabularInline):
     model = models.Repository
     extra = 0
     verbose_name_plural = 'Repositories'
-    fields = ('type', 'url', 'branch', 'website', 'permalink_prefix', 'last_synced_revisions', 'source_repo',)
+    fields = ('type', 'url', 'branch', 'website', 'permalink_prefix', 'last_synced_revisions',
+              'source_repo',)
 
 
 class SubpageInline(admin.TabularInline):
@@ -109,7 +136,8 @@ class SubpageInline(admin.TabularInline):
 
 class ProjectAdmin(admin.ModelAdmin):
     search_fields = ['name', 'slug']
-    list_display = ('name', 'slug', 'deadline', 'priority', 'contact_person', 'pk', 'enabled')
+    list_display = ('name', 'slug', 'deadline', 'priority', 'contact_person',
+                    'pk', 'enabled', 'sync_disabled',)
     ordering = ('disabled',)
 
     def contact_person(self, obj):
@@ -125,7 +153,8 @@ class ProjectAdmin(admin.ModelAdmin):
         (None, {
             'fields': (
                 'name', 'slug', 'info', 'deadline', 'priority',
-                'contact', 'langpack_url', 'can_be_requested', 'disabled'),
+                'contact', 'langpack_url', 'can_be_requested', 'disabled',
+                'sync_disabled'),
         }),
         ('WEBSITE', {
             'fields': ('url', 'width', 'links'),
@@ -171,6 +200,52 @@ class ChangedEntityLocaleAdmin(admin.ModelAdmin):
     raw_id_fields = ('entity',)
 
 
+class UserRoleLogActionAdmin(admin.ModelAdmin):
+    search_fields = (
+        'performed_by__email',
+        'performed_on__email',
+        'group__name',
+        'created_at'
+    )
+    list_display = (
+        'performed_by_email',
+        'action_type',
+        'performed_on_email',
+        'group',
+        'created_at'
+    )
+    ordering = (
+        '-created_at',
+    )
+
+    def get_user_edit_url(self, user_pk):
+        return reverse(
+            'admin:{}_{}_change'.format(
+                get_user_model()._meta.app_label,
+                get_user_model()._meta.model_name,
+            ),
+            args=(user_pk,)
+        )
+
+    def performed_on_email(self, obj):
+        return '<a href="{}">{}</a>'.format(
+            self.get_user_edit_url(obj.performed_on_id),
+            obj.performed_on.email
+        )
+
+    performed_on_email.short_description = "Performed on"
+    performed_on_email.allow_tags = True
+
+    def performed_by_email(self, obj):
+        return '<a href="{}">{}</a>'.format(
+            self.get_user_edit_url(obj.performed_by_id),
+            obj.performed_by.email
+        )
+
+    performed_by_email.short_description = "Performed by"
+    performed_by_email.allow_tags = True
+
+
 admin.site.register(User, UserAdmin)
 admin.site.register(Group, GroupAdmin)
 admin.site.register(models.Locale, LocaleAdmin)
@@ -181,3 +256,4 @@ admin.site.register(models.Entity, EntityAdmin)
 admin.site.register(models.Translation, TranslationAdmin)
 admin.site.register(models.TranslationMemoryEntry, TranslationMemoryEntryAdmin)
 admin.site.register(models.ChangedEntityLocale, ChangedEntityLocaleAdmin)
+admin.site.register(models.PermissionChangelog, UserRoleLogActionAdmin)

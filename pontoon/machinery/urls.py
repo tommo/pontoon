@@ -20,10 +20,11 @@ urlpatterns = [
         name='pontoon.translation_memory'),
     url(r'^machine-translation/$', views.machine_translation,
         name='pontoon.machine_translation'),
+    url(r'^machine-translation-caighdean/$',
+        views.machine_translation_caighdean,
+        name='pontoon.machine_translation_caighdean'),
     url(r'^microsoft-terminology/$', views.microsoft_terminology,
         name='pontoon.microsoft_terminology'),
-    url(r'^amagama/$', views.amagama,
-        name='pontoon.amagama'),
     url(r'^transvision/$', views.transvision,
         name='pontoon.transvision'),
 ]

@@ -3,7 +3,12 @@ from guardian.models import GroupObjectPermission
 from django.contrib.auth.models import User, Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models.signals import post_save, pre_save, post_delete, pre_delete
+from django.db.models.signals import (
+    post_save,
+    pre_save,
+    post_delete,
+    pre_delete
+)
 from django.dispatch import receiver
 
 from pontoon.base import errors
@@ -94,8 +99,12 @@ def create_locale_permissions_groups(sender, **kwargs):
         return
 
     try:
-        create_group(instance, 'translators', ['can_translate_locale'], '{} translators'.format(instance.code))
-        create_group(instance, 'managers', ['can_translate_locale', 'can_manage_locale'], '{} managers'.format(instance.code)) # noqa
+        create_group(
+            instance, 'translators', ['can_translate_locale'], instance.code
+        )
+        create_group(
+            instance, 'managers', ['can_translate_locale', 'can_manage_locale'], instance.code
+        )
     except ObjectDoesNotExist as e:
         errors.send_exception(e)
 
@@ -111,9 +120,12 @@ def create_project_locale_permissions_groups(sender, **kwargs):
         return
 
     try:
-        create_group(instance, 'translators', ['can_translate_project_locale'], '{}/{} translators'.format(
-            instance.project.slug, instance.locale.code,
-        ))
+        create_group(
+            instance,
+            'translators',
+            ['can_translate_project_locale'],
+            '{}/{}'.format(instance.project.slug, instance.locale.code)
+        )
     except ObjectDoesNotExist as e:
         errors.send_exception(e)
 
@@ -131,7 +143,9 @@ def assign_locale_group_permissions(sender, **kwargs):
 
     try:
         assign_group_permissions(instance, 'translators', ['can_translate_locale'])
-        assign_group_permissions(instance, 'managers', ['can_translate_locale', 'can_manage_locale'])
+        assign_group_permissions(
+            instance, 'managers', ['can_translate_locale', 'can_manage_locale']
+        )
     except ObjectDoesNotExist as e:
         errors.send_exception(e)
 

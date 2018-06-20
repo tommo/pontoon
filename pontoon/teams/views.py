@@ -1,5 +1,4 @@
 import json
-import logging
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -7,21 +6,19 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.mail import EmailMessage
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.http import Http404, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 from django.views.generic.detail import DetailView
 
+import bleach
 from guardian.decorators import permission_required_or_403
 
 from pontoon.base import forms
 from pontoon.base.models import Locale, Project
 from pontoon.base.utils import require_AJAX
 from pontoon.contributors.views import ContributorsMixin
-
-
-log = logging.getLogger('pontoon')
 
 
 @login_required(redirect_field_name='', login_url='/403')
@@ -57,6 +54,7 @@ def ajax_projects(request, locale):
         .filter(Q(locales=locale) | Q(can_be_requested=True))
         .prefetch_project_locale(locale)
         .order_by('name')
+        .annotate(enabled_locales=Count('project_locale', distinct=True))
     )
 
     if not projects:
@@ -78,18 +76,41 @@ def ajax_info(request, locale):
     })
 
 
+@require_POST
+@permission_required_or_403('base.can_manage_locale', (Locale, 'code', 'locale'))
+@transaction.atomic
+def ajax_update_info(request, locale):
+    team_description = request.POST.get('team_info', None)
+    team_description = bleach.clean(
+        team_description, strip=True,
+        tags=settings.ALLOWED_TAGS, attributes=settings.ALLOWED_ATTRIBUTES
+    )
+    locale = get_object_or_404(Locale, code=locale)
+    locale.team_description = team_description
+    locale.save()
+    return HttpResponse(team_description)
+
+
 @permission_required_or_403('base.can_manage_locale', (Locale, 'code', 'locale'))
 @transaction.atomic
 def ajax_permissions(request, locale):
-    l = get_object_or_404(Locale, code=locale)
-    project_locales = l.project_locale.available()
+    locale = get_object_or_404(Locale, code=locale)
+    project_locales = locale.project_locale.available()
 
     if request.method == 'POST':
-        locale_form = forms.LocalePermsForm(request.POST, instance=l, prefix='general')
+        locale_form = forms.LocalePermsForm(
+            request.POST,
+            instance=locale,
+            prefix='general',
+            user=request.user
+        )
         project_locale_form = forms.ProjectLocalePermsFormsSet(
             request.POST,
             prefix='project-locale',
             queryset=project_locales,
+            form_kwargs={
+                'user': request.user
+            }
         )
 
         if locale_form.is_valid() and project_locale_form.is_valid():
@@ -105,18 +126,31 @@ def ajax_permissions(request, locale):
         project_locale_form = forms.ProjectLocalePermsFormsSet(
             prefix='project-locale',
             queryset=project_locales,
+            form_kwargs={
+                'user': request.user
+            }
         )
 
-    managers = l.managers_group.user_set.all()
-    translators = l.translators_group.user_set.exclude(pk__in=managers).all()
-    all_users = User.objects.exclude(pk__in=managers).exclude(pk__in=translators).exclude(email='')
+    managers = locale.managers_group.user_set.order_by('email')
+    translators = locale.translators_group.user_set.exclude(pk__in=managers).order_by('email')
+    all_users = (
+        User.objects
+            .exclude(pk__in=managers | translators)
+            .exclude(email='')
+            .order_by('email')
+    )
 
-    contributors = User.translators.filter(translation__locale=l).values_list('email', flat=True).distinct()
-    locale_projects = l.projects_permissions
+    contributors_emails = set(
+        contributor.email
+        for contributor in User.translators.with_translation_counts(None, Q(locale=locale), None)
+    )
+
+    locale_projects = locale.projects_permissions
+
     return render(request, 'teams/includes/permissions.html', {
-        'locale': l,
+        'locale': locale,
         'all_users': all_users,
-        'contributors': contributors,
+        'contributors_emails': contributors_emails,
         'translators': translators,
         'managers': managers,
         'locale_projects': locale_projects,
@@ -145,7 +179,9 @@ def request_projects(request, locale):
 
     if settings.PROJECT_MANAGERS[0] != '':
         EmailMessage(
-            subject=u'Project request for {locale} ({code})'.format(locale=locale.name, code=locale.code),
+            subject=u'Project request for {locale} ({code})'.format(
+                locale=locale.name, code=locale.code
+            ),
             body=u'''
             Please add the following projects to {locale} ({code}):
             {projects}
@@ -180,4 +216,4 @@ class LocaleContributorsView(ContributorsMixin, DetailView):
         return 'locale'
 
     def contributors_filter(self, **kwargs):
-        return Q(translation__locale=self.object)
+        return Q(locale=self.object)

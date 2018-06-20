@@ -1,6 +1,6 @@
 import codecs
-import json
-import logging
+import fnmatch
+import functools
 import os
 import pytz
 import re
@@ -11,25 +11,25 @@ import time
 import zipfile
 
 from datetime import datetime, timedelta
+
+from guardian.decorators import (
+    permission_required as guardian_permission_required)
+
+from django.utils.text import slugify
+from six import text_type
 from xml.sax.saxutils import (
     escape as xml_escape,
     quoteattr,
 )
 
 from django.db.models import Prefetch
-from django.http import HttpResponse, HttpResponseBadRequest
+from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.translation import trans_real
 
-from translate.filters import checks
-from translate.storage import base as storage_base
 from translate.storage.placeables import base, general, parse
 from translate.storage.placeables.interfaces import BasePlaceable
-from translate.lang import data as lang_data
-
-
-log = logging.getLogger('pontoon')
 
 
 def split_ints(s):
@@ -47,7 +47,7 @@ def get_project_locale_from_request(request, locales):
     for a in accept:
         try:
             return locales.get(code__iexact=a[0]).code
-        except:
+        except BaseException:
             continue
 
 
@@ -82,7 +82,10 @@ class SpacesPlaceable(base.Ph):
 class PythonFormatNamedPlaceable(base.Ph):
     """Placeable handling named format string in python"""
     istranslatable = False
-    regex = re.compile(r'%\([[\w\d\!\.,\[\]%:$<>\+\-= ]*\)[+|-|0\d+|#]?[\.\d+]?[s|d|e|f|g|o|x|c|%]', re.IGNORECASE)
+    regex = re.compile(
+        r'%\([[\w\d\!\.,\[\]%:$<>\+\-= ]*\)[+|-|0\d+|#]?[\.\d+]?[s|d|e|f|g|o|x|c|%]',
+        re.IGNORECASE
+    )
     parse = classmethod(general.regex_parse)
 
 
@@ -90,6 +93,16 @@ class PythonFormatPlaceable(base.Ph):
     """Placeable handling new format strings in python"""
     istranslatable = False
     regex = re.compile(r'\{{?[[\w\d\!\.,\[\]%:$<>\+\-= ]*\}?}', )
+    parse = classmethod(general.regex_parse)
+
+
+class JsonPlaceholderPlaceable(base.Ph):
+    """
+    Placeable handling placeholders in JSON format
+    as used by the WebExtensions API
+    """
+    istranslatable = False
+    regex = re.compile(r'\$[A-Z0-9_]+\$', )
     parse = classmethod(general.regex_parse)
 
 
@@ -117,6 +130,8 @@ def mark_placeables(text):
         general.PythonFormattingPlaceable.parse,
         general.JavaMessageFormatPlaceable.parse,
         general.FormattingPlaceable.parse,
+
+        JsonPlaceholderPlaceable.parse,
 
         # The Qt variables can consume the %1 in %1$s which will mask a printf
         # placeable, so it has to come later.
@@ -154,7 +169,8 @@ def mark_placeables(text):
         'XMLTagPlaceable': "XML tag",
         'OptionPlaceable': "Command line option",
         'PythonFormatNamedPlaceable': "Python format string",
-        'PythonFormatPlaceable': "Python format string"
+        'PythonFormatPlaceable': "Python format string",
+        'JsonPlaceholderPlaceable': "JSON placeholder",
     }
 
     output = u""
@@ -167,7 +183,7 @@ def mark_placeables(text):
         # Placeable: mark
         if isinstance(item, BasePlaceable):
             class_name = item.__class__.__name__
-            placeable = unicode(item)
+            placeable = text_type(item)
 
             # CSS class used to mark the placeable
             css = {
@@ -202,80 +218,9 @@ def mark_placeables(text):
 
         # Not a placeable: skip
         else:
-            output += unicode(item).replace('<', '&lt;').replace('>', '&gt;')
+            output += text_type(item).replace('<', '&lt;').replace('>', '&gt;')
 
     return output
-
-
-def quality_check(original, string, locale, ignore):
-    """Check for obvious errors like blanks and missing interpunction."""
-
-    if not ignore:
-        original = lang_data.normalized_unicode(original)
-        string = lang_data.normalized_unicode(string)
-
-        unit = storage_base.TranslationUnit(original)
-        unit.target = string
-        checker = checks.StandardChecker(
-            checkerconfig=checks.CheckerConfig(targetlanguage=locale.code))
-
-        warnings = checker.run_filters(unit)
-        if warnings:
-
-            # https://github.com/translate/pootle/
-            check_names = {
-                'accelerators': 'Accelerators',
-                'acronyms': 'Acronyms',
-                'blank': 'Blank',
-                'brackets': 'Brackets',
-                'compendiumconflicts': 'Compendium conflict',
-                'credits': 'Translator credits',
-                'doublequoting': 'Double quotes',
-                'doublespacing': 'Double spaces',
-                'doublewords': 'Repeated word',
-                'emails': 'E-mail',
-                'endpunc': 'Ending punctuation',
-                'endwhitespace': 'Ending whitespace',
-                'escapes': 'Escapes',
-                'filepaths': 'File paths',
-                'functions': 'Functions',
-                'gconf': 'GConf values',
-                'kdecomments': 'Old KDE comment',
-                'long': 'Long',
-                'musttranslatewords': 'Must translate words',
-                'newlines': 'Newlines',
-                'nplurals': 'Number of plurals',
-                'notranslatewords': 'Don\'t translate words',
-                'numbers': 'Numbers',
-                'options': 'Options',
-                'printf': 'printf()',
-                'puncspacing': 'Punctuation spacing',
-                'purepunc': 'Pure punctuation',
-                'sentencecount': 'Number of sentences',
-                'short': 'Short',
-                'simplecaps': 'Simple capitalization',
-                'simpleplurals': 'Simple plural(s)',
-                'singlequoting': 'Single quotes',
-                'startcaps': 'Starting capitalization',
-                'startpunc': 'Starting punctuation',
-                'startwhitespace': 'Starting whitespace',
-                'tabs': 'Tabs',
-                'unchanged': 'Unchanged',
-                'untranslated': 'Untranslated',
-                'urls': 'URLs',
-                'validchars': 'Valid characters',
-                'variables': 'Placeholders',
-                'xmltags': 'XML tags',
-            }
-
-            warnings_array = []
-            for key in warnings.keys():
-                warning = check_names.get(key, key)
-                warnings_array.append(warning)
-
-            return HttpResponse(json.dumps({
-                'warnings': warnings_array,
-            }), content_type='application/json')
 
 
 def first(collection, test, default=None):
@@ -332,11 +277,34 @@ def require_AJAX(f):
     """
     AJAX request required decorator
     """
+    @functools.wraps(f)  # Required by New Relic
     def wrap(request, *args, **kwargs):
         if not request.is_ajax():
             return HttpResponseBadRequest('Bad Request: Request must be AJAX')
         return f(request, *args, **kwargs)
     return wrap
+
+
+def permission_required(perm, *args, **kwargs):
+    """Wrapper for guardian permission_required decorator.
+
+    If the request is not permitted and user is anon then it returns 404
+    otherwise 403.
+    """
+
+    def wrapper(f):
+
+        @functools.wraps(f)
+        def wrap(request, *_args, **_kwargs):
+            perm_kwargs = (
+                dict(return_404=True)
+                if request.user.is_anonymous
+                else dict(return_403=True))
+            perm_kwargs.update(kwargs)
+            protected = guardian_permission_required(perm, *args, **perm_kwargs)
+            return protected(f)(request, *_args, **_kwargs)
+        return wrap
+    return wrapper
 
 
 def _download_file(prefixes, dirnames, relative_path):
@@ -371,9 +339,9 @@ def get_download_content(slug, code, part):
     """
     Get content of the file to be downloaded.
 
-    :param str slug: Project slug.
-    :param str code: Locale code.
-    :param str part: Resource path or Subpage name.
+    :arg str slug: Project slug.
+    :arg str code: Locale code.
+    :arg str part: Resource path or Subpage name.
     """
     # Avoid circular import; someday we should refactor to avoid.
     from pontoon.sync import formats
@@ -475,11 +443,11 @@ def handle_upload_content(slug, code, part, f, user):
     """
     Update translations in the database from uploaded file.
 
-    :param str slug: Project slug.
-    :param str code: Locale code.
-    :param str part: Resource path or Subpage name.
-    :param UploadedFile f: UploadedFile instance.
-    :param User user: User uploading the file.
+    :arg str slug: Project slug.
+    :arg str code: Locale code.
+    :arg str part: Resource path or Subpage name.
+    :arg UploadedFile f: UploadedFile instance.
+    :arg User user: User uploading the file.
     """
     # Avoid circular import; someday we should refactor to avoid.
     from pontoon.sync import formats
@@ -528,7 +496,7 @@ def handle_upload_content(slug, code, part, f, user):
         Prefetch(
             'translation_set',
             queryset=Translation.objects.filter(locale=locale, approved_date__lte=timezone.now()),
-            to_attr='old_translations'
+            to_attr='db_translations_approved_before_sync'
         )
     )
     entities_dict = {entity.key: entity for entity in entities_qs}
@@ -539,20 +507,21 @@ def handle_upload_content(slug, code, part, f, user):
             entity = entities_dict[key]
             changeset.update_entity_translations_from_vcs(
                 entity, locale.code, vcs_translation, user,
-                entity.db_translations, entity.old_translations
+                entity.db_translations, entity.db_translations_approved_before_sync
             )
 
     changeset.bulk_create_translations()
     changeset.bulk_update_translations()
+    changeset.bulk_create_translaton_memory_entries()
     TranslatedResource.objects.get(resource=resource, locale=locale).calculate_stats()
 
     # Mark translations as changed
     changed_entities = {}
     existing = ChangedEntityLocale.objects.values_list('entity', 'locale').distinct()
-    for t in changeset.translations_to_create + changeset.translations_to_update:
+    for t in changeset.changed_translations:
         key = (t.entity.pk, t.locale.pk)
         # Remove duplicate changes to prevent unique constraint violation
-        if not key in existing:
+        if key not in existing:
             changed_entities[key] = ChangedEntityLocale(entity=t.entity, locale=t.locale)
 
     ChangedEntityLocale.objects.bulk_create(changed_entities.values())
@@ -599,11 +568,12 @@ def convert_to_unix_time(my_datetime):
 
 def build_translation_memory_file(creation_date, locale_code, entries):
     """
-    TMX files will contain large amount of entries and it's impossible to render all the data with django templates.
+    TMX files will contain large amount of entries and it's impossible to render all the data with
+    django templates.
     Rendering of string in memory is a lot faster.
-    :param datetime creation_date: when TMX file is being created.
-    :param str locale_code: code of a locale
-    :param list entries: A list which contains tuples with following items:
+    :arg datetime creation_date: when TMX file is being created.
+    :arg str locale_code: code of a locale
+    :arg list entries: A list which contains tuples with following items:
                          * resource_path - path of a resource,
                          * key - key of an entity,
                          * source - source string of entity,
@@ -629,6 +599,7 @@ def build_translation_memory_file(creation_date, locale_code, entries):
         }
     )
     for resource_path, key, source, target, project_name, project_slug in entries:
+        tuid = ':'.join((project_slug, slugify(resource_path), slugify(key)))
         yield (
             u'\n\t\t<tu tuid=%(tuid)s srclang="en-US">'
             u'\n\t\t\t<tuv xml:lang="en-US">'
@@ -638,7 +609,7 @@ def build_translation_memory_file(creation_date, locale_code, entries):
             u'\n\t\t\t\t<seg>%(target)s</seg>'
             u'\n\t\t\t</tuv>'
             u'\n\t\t</tu>' % {
-                'tuid': quoteattr('%s:%s:%s' % (project_slug, resource_path, key)),
+                'tuid': quoteattr(tuid),
                 'source': xml_escape(source),
                 'locale_code': quoteattr(locale_code),
                 'target': xml_escape(target),
@@ -650,3 +621,61 @@ def build_translation_memory_file(creation_date, locale_code, entries):
         u'\n\t</body>'
         u'\n</tmx>'
     )
+
+
+def glob_to_regex(glob):
+    """This util uses python's fnmatch to convert a glob to a regex in a way
+    that can then be used with django's `__regex` queryset selector.
+
+    It prefixes the regex with `^`, and replaces the more complex match ending
+    provided by fnmatch, with the simpler `$`
+
+    """
+    regex = "^%s" % fnmatch.translate(glob)
+    return (
+        "%s$" % regex[:-7]
+        if regex[-7:] == "\Z(?ms)"
+        else regex)
+
+
+def get_m2m_changes(current_qs, new_qs):
+    """
+    Get difference between states of a many to many relation.
+
+    :arg django.db.models.QuerySet `current_qs`: objects from the current state of relation.
+    :arg django.db.models.QuerySet `final_qs`: objects from the future state of m2m
+    :returns: A tuple with 2 querysets for added and removed items from m2m
+    """
+
+    add_items = new_qs.exclude(
+        pk__in=current_qs.values_list('pk', flat=True)
+    )
+
+    remove_items = current_qs.exclude(
+        pk__in=new_qs.values_list('pk', flat=True)
+    )
+
+    return list(add_items), list(remove_items)
+
+
+def is_same(same_translations, can_translate):
+    """
+    Check if translation is the same
+    :arg QuerySet `same_translations`: translations that have the same string
+        as a suggestion/translation.
+    :arg boolean `can_translate`: user is able to submit translations.
+    :returns: True if same translation already exists.
+    """
+    if not same_translations:
+        return False
+
+    st = same_translations[0]
+
+    if can_translate:
+        if st.approved and not st.fuzzy:
+            return True
+    else:
+        if not st.fuzzy:
+            return True
+
+    return False

@@ -62,6 +62,7 @@ Installation
    .. code-block:: bash
 
       pip install --require-hashes -r requirements-dev.txt
+      pip install --require-hashes -r requirements-test.txt
 
 4. Create your database, using the following set of commands:
 
@@ -142,6 +143,12 @@ Installation
    .. code-block:: bash
 
       npm install
+
+11. Run webpack:
+
+   .. code-block:: bash
+
+      ./node_modules/.bin/webpack -p
 
 Once you've finished these steps, you should be able to start the site by
 running:

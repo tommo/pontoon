@@ -1,4 +1,3 @@
-import logging
 import uuid
 
 from django.contrib.auth.decorators import login_required
@@ -6,7 +5,7 @@ from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.generic.detail import DetailView
 
@@ -18,9 +17,7 @@ from pontoon.base.models import Project
 from pontoon.base.utils import require_AJAX, split_ints
 from pontoon.contributors.views import ContributorsMixin
 from pontoon.projects import forms
-
-
-log = logging.getLogger('pontoon')
+from pontoon.tags.utils import TagsTool
 
 @login_required(redirect_field_name='', login_url='/403')
 def projects(request):
@@ -40,9 +37,12 @@ def projects(request):
 def project(request, slug):
     """Project dashboard."""
     project = get_object_or_404(Project.objects.available(), slug=slug)
-
     return render(request, 'projects/project.html', {
         'project': project,
+        'tags': (
+            len(TagsTool(projects=[project], priority=True))
+            if project.tags_enabled
+            else None)
     })
 
 
@@ -60,6 +60,25 @@ def ajax_teams(request, slug):
     return render(request, 'projects/includes/teams.html', {
         'project': project,
         'locales': locales,
+    })
+
+
+@require_AJAX
+def ajax_tags(request, slug):
+    """Tags tab."""
+    project = get_object_or_404(Project, slug=slug)
+
+    if not project.tags_enabled:
+        raise Http404
+
+    tags_tool = TagsTool(
+        projects=[project],
+        priority=True,
+    )
+
+    return render(request, 'projects/includes/tags.html', {
+        'project': project,
+        'tags': list(tags_tool),
     })
 
 
@@ -160,4 +179,4 @@ class ProjectContributorsView(ContributorsMixin, DetailView):
         return 'project'
 
     def contributors_filter(self, **kwargs):
-        return Q(translation__entity__resource__project=self.object)
+        return Q(entity__resource__project=self.object)

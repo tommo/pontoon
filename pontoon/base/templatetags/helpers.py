@@ -1,8 +1,14 @@
 import cgi
 import datetime
 import json
-import urllib
-import urlparse
+
+import jinja2
+from allauth.socialaccount import providers
+from allauth.utils import get_request_param
+from django_jinja import library
+from fluent.syntax import FluentParser, FluentSerializer, ast
+from six import text_type
+from six.moves.urllib import parse as six_parse
 
 from django import template
 from django.contrib.humanize.templatetags import humanize
@@ -13,13 +19,10 @@ from django.utils.encoding import smart_str
 from django.utils.encoding import force_text
 from django.utils.functional import Promise
 
-import jinja2
-from django_jinja import library
-from allauth.socialaccount import providers
-from allauth.utils import get_request_param
-
 
 register = template.Library()
+parser = FluentParser()
+serializer = FluentSerializer()
 
 
 class LazyObjectsJsonEncoder(json.JSONEncoder):
@@ -59,35 +62,36 @@ def urlparams(url_, hash=None, **query):
     New query params will be appended to exising parameters, except duplicate
     names, which will be replaced.
     """
-    url = urlparse.urlparse(url_)
+    url = six_parse.urlparse(url_)
     fragment = hash if hash is not None else url.fragment
 
     # Use dict(parse_qsl) so we don't get lists of values.
     q = url.query
-    query_dict = dict(urlparse.parse_qsl(smart_str(q))) if q else {}
+    query_dict = dict(six_parse.parse_qsl(smart_str(q))) if q else {}
     query_dict.update((k, v) for k, v in query.items())
 
     query_string = _urlencode([(k, v) for k, v in query_dict.items()
                                if v is not None])
-    new = urlparse.ParseResult(url.scheme, url.netloc, url.path, url.params,
-                               query_string, fragment)
+    new = six_parse.ParseResult(
+        url.scheme, url.netloc, url.path, url.params, query_string, fragment
+    )
     return new.geturl()
 
 
 def _urlencode(items):
     """A Unicode-safe URLencoder."""
     try:
-        return urllib.urlencode(items)
+        return six_parse.urlencode(items)
     except UnicodeEncodeError:
-        return urllib.urlencode([(k, smart_str(v)) for k, v in items])
+        return six_parse.urlencode([(k, smart_str(v)) for k, v in items])
 
 
 @library.filter
 def urlencode(txt):
     """Url encode a path."""
-    if isinstance(txt, unicode):
+    if isinstance(txt, text_type):
         txt = txt.encode('utf-8')
-    return urllib.quote_plus(txt)
+    return six_parse.quote_plus(txt)
 
 
 @library.global_function
@@ -185,7 +189,9 @@ def format_timedelta(value):
 @register.filter
 @library.filter
 def nospam(self):
-    return jinja2.Markup(cgi.escape(self, True).replace('@', '&#64;').replace('.', '&#46;').replace('\'', '&quot;'))
+    return jinja2.Markup(
+        cgi.escape(self, True).replace('@', '&#64;').replace('.', '&#46;').replace('\'', '&quot;')
+    )
 
 
 @library.global_function
@@ -238,3 +244,66 @@ def local_url(url, code=None):
     """Replace occurences of `{locale_code} in URL with provided code."""
     code = code or 'en-US'
     return url.format(locale_code=code)
+
+
+@library.filter
+def dict_html_attrs(dict_obj):
+    """Render json object properties into a series of data-* attributes."""
+    return jinja2.Markup(' '.join(
+        [u'data-{}="{}"'.format(k, v) for k, v in dict_obj.items()]
+    ))
+
+
+def _serialize_elements(elements):
+    """Serialize text elements and placeables into a simple string."""
+    response = ''
+
+    for element in elements:
+        if isinstance(element, ast.TextElement):
+            response += element.value
+
+        elif isinstance(element, ast.Placeable):
+            if isinstance(element.expression, ast.ExternalArgument):
+                response += '{ $' + element.expression.id.name + ' }'
+
+            elif isinstance(element.expression, ast.MessageReference):
+                response += '{ ' + element.expression.id.name + ' }'
+
+            elif isinstance(element.expression, (
+                ast.CallExpression,
+                ast.StringExpression,
+                ast.NumberExpression,
+                ast.VariantExpression,
+                ast.AttributeExpression,
+            )):
+                response += '{ ' + serializer.serialize_expression(element.expression) + ' }'
+
+            elif hasattr(element.expression, 'variants'):
+                variant_elements = filter(
+                    lambda x: x.default, element.expression.variants
+                )[0].value.elements
+
+                response += _serialize_elements(variant_elements)
+
+    return response
+
+
+@library.filter
+def as_simple_translation(source):
+    """Transfrom complex FTL-based strings into single-value strings."""
+    translation_ast = parser.parse_entry(source)
+
+    # Non-FTL string or string with an error
+    if isinstance(translation_ast, ast.Junk):
+        return source
+
+    # Value: use entire AST
+    if translation_ast.value:
+        tree = translation_ast
+
+    # Attributes (must be present in valid AST if value isn't):
+    # use AST of the first attribute
+    else:
+        tree = translation_ast.attributes[0]
+
+    return _serialize_elements(tree.value.elements)

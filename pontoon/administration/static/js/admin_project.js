@@ -1,7 +1,7 @@
 $(function() {
 
   // Before submitting the form
-  $('#admin-form').submit(function (e) {
+  $('#admin-form').submit(function () {
     // Update locales
     var arr = [];
     $("#selected").parent().siblings('ul').find('li:not(".no-match")').each(function() {
@@ -84,8 +84,31 @@ $(function() {
     });
   });
 
+  $("body").on("blur", "[id^=id_tag_set-][id$=-name]", function() {
+    var target = $('input#' + $(this).attr('id').replace('-name', '-slug'));
+    var $this = this;
+    if (target.val() || !$(this).val()) {
+      return;
+    }
+    target.attr('placeholder', 'Retrieving...');
+    $.ajax({
+      url: '/admin/get-slug/',
+      data: {
+        name: $($this).val()
+      },
+      success: function(data) {
+        var value = (data === "error") ? "" : data;
+        target.val(value);
+        target.attr('placeholder', '');
+      },
+      error: function() {
+        target.attr('placeholder', '');
+      }
+    });
+  });
+
   // Copy locales from another project
-  $('#copy-locales option').on('click', function(e) {
+  $('#copy-locales option').on('click', function() {
     var projectLocales = [];
 
     try {
@@ -100,6 +123,28 @@ $(function() {
       $('.locale.select:first').find('[data-id=' + id + ']').click();
     });
   });
+
+  // Show new strings input or link when source type is "database".
+  function displayNewStringsInput(input) {
+    if (input.val() === 'database') {
+      $('.new-strings').show();
+      $('.manage-strings').show();
+
+      // For now, we also hide the entire Repositories section. We might
+      // want to revisit that behavior later.
+      $('.repositories').hide();
+    }
+    else {
+      $('.new-strings').hide();
+      $('.manage-strings').hide();
+      $('.repositories').show();
+    }
+  }
+  var dataSourceInput = $('#id_data_source');
+  dataSourceInput.on('change', function () {
+    displayNewStringsInput(dataSourceInput);
+  });
+  displayNewStringsInput(dataSourceInput);
 
   // Suggest public repository website URL
   $('body').on('blur', '.repo input', function() {
@@ -122,25 +167,30 @@ $(function() {
   // Add inline form item (e.g. subpage or external resource)
   var count = {
     'subpage': $('.subpage:last').data('count'),
-    'externalresource': $('.externalresource:last').data('count')
+    'externalresource': $('.externalresource:last').data('count'),
+    'entity': $('.entity:last').data('count'),
+    'tag': $('.tag:last').data('count'),
   };
   $('.add-inline').click(function(e) {
     e.preventDefault();
 
-    var type = $(this).data('type'),
-        form = $('.' + type + ':last').html().replace(/__prefix__/g, count[type]);
+    var type = $(this).data('type');
+    var form = $('.' + type + ':last').html().replace(/__prefix__/g, count[type]);
 
     $('.' + type + ':last').before('<div class="' + type + ' inline clearfix">' + form + '</div>');
     count[type]++;
+
+    // These two forms of selectors cover all the cases for django-generated forms we use.
     $('#id_' + type + '_set-TOTAL_FORMS').val(count[type]);
+    $('#id_form-TOTAL_FORMS').val(count[type]);
   });
 
   // Toggle branch input
-  function toggleBranchInput(element, value) {
+  function toggleBranchInput(element) {
     $(element).parents('.repository').toggleClass('git', $(element).val() === 'git');
   }
   // On select change
-  $('body').on('change', '.repository .type-wrapper select', function(e) {
+  $('body').on('change', '.repository .type-wrapper select', function() {
     toggleBranchInput(this);
   });
   // On page load

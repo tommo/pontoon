@@ -49,6 +49,12 @@ DATABASES = {
     'default': dj_database_url.config(default='mysql://root@localhost/pontoon')
 }
 
+# Ensure that psycopg2 uses a secure SSL connection.
+if not DEV and not DEBUG:
+    if 'OPTIONS' not in DATABASES['default']:
+        DATABASES['default']['OPTIONS'] = {}
+    DATABASES['default']['OPTIONS']['sslmode'] = 'require'
+
 
 # Absolute path to the directory static files should be collected to.
 # Don't put anything in this directory yourself; store your static files
@@ -64,25 +70,7 @@ SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'True') != 'Fals
 
 APP_URL_KEY = 'APP_URL'
 
-# For the sake of integration with Heroku, we dynamically load domain name
-# From the file that's set right after the build phase.
-if os.environ.get('HEROKU_DEMO') and not os.environ.get('SITE_URL'):
-    def _site_url():
-        from django.contrib.sites.models import Site
-        from django.core.cache import cache
-
-        app_url = cache.get(APP_URL_KEY)
-
-        # Sometimes data from cache is flushed, We can't do anything about that.
-        if not app_url:
-            app_url = "https://{}".format(Site.objects.get(pk=1).domain)
-            cache.set(APP_URL_KEY, app_url)
-
-        return app_url
-
-    SITE_URL = lazy(_site_url, str)()
-else:
-    SITE_URL = os.environ.get('SITE_URL', 'http://localhost:8000')
+SITE_URL = os.environ.get('SITE_URL', 'http://localhost:8000')
 
 # Custom LD_LIBRARY_PATH environment variable for SVN
 SVN_LD_LIBRARY_PATH = os.environ.get('SVN_LD_LIBRARY_PATH', '')
@@ -126,12 +114,14 @@ INSTALLED_APPS = (
     'pontoon.administration',
     'pontoon.base',
     'pontoon.contributors',
+    'pontoon.checks',
     'pontoon.intro',
     'pontoon.localizations',
     'pontoon.machinery',
     'pontoon.projects',
     'pontoon.sync',
     'pontoon.teams',
+    'pontoon.tags',
 
     # Django contrib apps
     'django.contrib.admin',
@@ -144,7 +134,6 @@ INSTALLED_APPS = (
     'django.contrib.sites',
 
     # Third-party apps, patches, fixes
-    'commonware.response.cookies',
     'django_jinja',
     'django_nose',
     'pipeline',
@@ -156,16 +145,18 @@ INSTALLED_APPS = (
     'allauth.socialaccount',
     'allauth.socialaccount.providers.fxa',
     'notifications',
+    'graphene_django',
+    'webpack_loader',
 )
 
 BLOCKED_IPS = os.environ.get('BLOCKED_IPS', '').split(',')
 
 MIDDLEWARE_CLASSES = (
+    'django_cookies_samesite.middleware.CookiesSameSite',
     'django.middleware.gzip.GZipMiddleware',
     'sslify.middleware.SSLifyMiddleware',
     'pontoon.base.middleware.RaygunExceptionMiddleware',
     'pontoon.base.middleware.BlockedIpMiddleware',
-    'pontoon.base.middleware.HerokuDemoSetupMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -191,6 +182,7 @@ CONTEXT_PROCESSORS = (
 TEMPLATES = [
     {
         'BACKEND': 'django_jinja.backend.Jinja2',
+        'NAME': 'jinja2',
         'APP_DIRS': True,
         'OPTIONS': {
             'match_extension': '',
@@ -209,6 +201,7 @@ TEMPLATES = [
                 'django_jinja.builtins.extensions.StaticFilesExtension',
                 'django_jinja.builtins.extensions.DjangoFiltersExtension',
                 'pipeline.templatetags.ext.PipelineExtension',
+                'webpack_loader.contrib.jinja2ext.WebpackExtension',
             ],
         }
     },
@@ -226,6 +219,8 @@ TEMPLATES = [
     },
 ]
 
+SESSION_COOKIE_SAMESITE = 'lax'
+
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
     'allauth.account.auth_backends.AuthenticationBackend',
@@ -236,12 +231,9 @@ AUTHENTICATION_BACKENDS = [
 # App supports giving permissions for anonymous users.
 ANONYMOUS_USER_ID = -1
 GUARDIAN_RAISE_403 = True
-
-PIPELINE_COMPILERS = (
-    'pipeline.compilers.es6.ES6Compiler',
+PIPELINE_YUGLIFY_BINARY = path(
+    os.environ.get('YUGLIFY_BINARY', 'node_modules/.bin/yuglify')
 )
-
-PIPELINE_YUGLIFY_BINARY = path('node_modules/.bin/yuglify')
 PIPELINE_BABEL_BINARY = path('node_modules/.bin/babel')
 PIPELINE_BABEL_ARGUMENTS = '--modules ignore'
 
@@ -285,6 +277,7 @@ PIPELINE_CSS = {
             'css/table.css',
             'css/contributors.css',
             'css/heading_info.css',
+            'css/info.css',
         ),
         'output_filename': 'css/localization.min.css',
     },
@@ -301,6 +294,7 @@ PIPELINE_CSS = {
             'css/contributors.css',
             'css/heading_info.css',
             'css/team.css',
+            'css/info.css',
         ),
         'output_filename': 'css/team.min.css',
     },
@@ -336,6 +330,7 @@ PIPELINE_CSS = {
         'source_filenames': (
             'css/multiple_locale_selector.css',
             'css/contributor.css',
+            'css/team_selector.css',
             'css/settings.css',
         ),
         'output_filename': 'css/settings.min.css',
@@ -349,6 +344,7 @@ PIPELINE_CSS = {
     },
     'machinery': {
         'source_filenames': (
+            'css/team_selector.css',
             'css/machinery.css',
         ),
         'output_filename': 'css/machinery.min.css',
@@ -405,6 +401,7 @@ PIPELINE_JS = {
             'js/table.js',
             'js/progress-chart.js',
             'js/tabs.js',
+            'js/info.js',
         ),
         'output_filename': 'js/localization.min.js',
     },
@@ -434,7 +431,7 @@ PIPELINE_JS = {
             'js/tabs.js',
             'js/request_projects.js',
             'js/permissions.js',
-            'js/team.js',
+            'js/info.js',
         ),
         'output_filename': 'js/team.min.js',
     },
@@ -468,6 +465,8 @@ PIPELINE_JS = {
             'js/lib/jquery-ui.js',
             'js/multiple_locale_selector.js',
             'js/contributor.js',
+            'js/team_selector.js',
+            'js/settings.js'
         ),
         'output_filename': 'js/settings.min.js',
     },
@@ -482,6 +481,7 @@ PIPELINE_JS = {
         'source_filenames': (
             'js/lib/diff.js',
             'js/lib/clipboard.min.js',
+            'js/team_selector.js',
             'js/machinery.js',
         ),
         'output_filename': 'js/machinery.min.js',
@@ -512,7 +512,7 @@ else:
 # Site ID is used by Django's Sites framework.
 SITE_ID = 1
 
-## Media and templates.
+# Media and templates.
 
 # Absolute path to the directory that holds media.
 # Example: "/home/media/media.lawrence.com/"
@@ -529,23 +529,26 @@ STATIC_URL = STATIC_HOST + '/static/'
 
 STATICFILES_STORAGE = 'pontoon.base.storage.GzipManifestPipelineStorage'
 STATICFILES_FINDERS = (
+    'pipeline.finders.PipelineFinder',
     'django.contrib.staticfiles.finders.FileSystemFinder',
     'django.contrib.staticfiles.finders.AppDirectoriesFinder',
-    'pipeline.finders.PipelineFinder',
 )
+STATICFILES_DIRS = [path('assets')]
 
 
 # Set ALLOWED_HOSTS based on SITE_URL setting.
 def _allowed_hosts():
     from django.conf import settings
-    from urlparse import urlparse
+    from six.moves.urllib.parse import urlparse
 
     host = urlparse(settings.SITE_URL).netloc  # Remove protocol and path
     host = host.rsplit(':', 1)[0]  # Remove port
     return [host]
+
+
 ALLOWED_HOSTS = lazy(_allowed_hosts, list)()
 
-## Auth
+# Auth
 # The first hasher in this list will be used for new passwords.
 # Any other hasher in the list can be used for existing passwords.
 PASSWORD_HASHERS = (
@@ -558,7 +561,7 @@ PASSWORD_HASHERS = (
     'django.contrib.auth.hashers.UnsaltedMD5PasswordHasher',
 )
 
-## Logging
+# Logging
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -578,7 +581,7 @@ LOGGING = {
         },
         'pontoon': {
             'handlers': ['console'],
-            'level': os.environ.get('DJANGO_LOG_LEVEL', 'INFO'),
+            'level': os.environ.get('DJANGO_LOG_LEVEL', 'DEBUG' if DEBUG else 'INFO'),
         },
     }
 }
@@ -586,14 +589,13 @@ LOGGING = {
 if DEBUG:
     LOGGING['handlers']['console']['formatter'] = 'verbose'
 
-
 if os.environ.get('DJANGO_SQL_LOG', False):
     LOGGING['loggers']['django.db.backends'] = {
         'level': 'DEBUG',
         'handlers': ['console']
     }
 
-## Tests
+# Tests
 TEST_RUNNER = 'django_nose.NoseTestSuiteRunner'
 NOSE_ARGS = ['--logging-filter=-factory,-django.db,-raygun4py',
              '--logging-clear-handlers']
@@ -646,15 +648,17 @@ CSP_IMG_SRC = (
     "'self'",
     "https:",
     "https://*.wp.com/pontoon.mozilla.org/",
-    "https://ssl.google-analytics.com",
+    "https://www.google-analytics.com",
     "https://www.gravatar.com/avatar/",
 )
 CSP_SCRIPT_SRC = (
     "'self'",
     "'unsafe-eval'",
-    "'sha256-x3niK4UU+vG6EGT2NK2rwi2j/etQodJd840oRpEnqd4='",
     "'sha256-fDsgbzHC0sNuBdM4W91nXVccgFLwIDkl197QEca/Cl4='",
-    "https://ssl.google-analytics.com/ga.js",
+
+    # Rules related to Google Analytics
+    "'sha256-G5/M3dBlZdlvno5Cibw42fbeLr2PTEGd1M909Z7vPZE='",
+    "https://www.google-analytics.com/analytics.js",
 )
 CSP_STYLE_SRC = ("'self'", "'unsafe-inline'",)
 
@@ -674,7 +678,7 @@ PORT = 80
 # Names for slave databases from the DATABASES setting.
 SLAVE_DATABASES = []
 
-## Internationalization.
+# Internationalization.
 
 # Enable timezone-aware datetimes.
 USE_TZ = True
@@ -696,40 +700,17 @@ USE_I18N = False
 # calendars according to the current locale
 USE_L10N = False
 
-# Microsoft Translator Locales
-MICROSOFT_TRANSLATOR_LOCALES = [
-    'ar', 'bs-Latn', 'bg', 'ca', 'zh-CHS', 'zh-CHT', 'hr', 'cs', 'da', 'nl',
-    'en', 'et', 'fi', 'fr', 'de', 'el', 'ht', 'he', 'hi', 'mww', 'hu', 'id',
-    'it', 'ja', 'tlh', 'tlh-Qaak', 'ko', 'lv', 'lt', 'ms', 'mt', 'yua', 'no',
-    'otq', 'fa', 'pl', 'pt', 'ro', 'ru', 'sr-Cyrl', 'sr-Latn', 'sk', 'sl',
-    'es', 'sv', 'th', 'tr', 'uk', 'ur', 'vi', 'cy'
+# Bleach tags and attributes
+ALLOWED_TAGS = [
+    'a', 'abbr', 'acronym', 'b', 'blockquote', 'br', 'code', 'em', 'i',
+    'li', 'ol', 'p', 'strong', 'ul',
 ]
 
-# Microsoft Terminology Service API Locales
-MICROSOFT_TERMINOLOGY_LOCALES = [
-    'af-za', 'am-et', 'ar-eg', 'ar-sa', 'as-in', 'az-latn-az', 'be-by',
-    'bg-bg', 'bn-bd', 'bn-in', 'bs-cyrl-ba', 'bs-latn-ba', 'ca-es',
-    'ca-es-valencia', 'chr-cher-us', 'cs-cz', 'cy-gb', 'da-dk', 'de-at',
-    'de-ch', 'de-de', 'el-gr', 'en-au', 'en-ca', 'en-gb', 'en-ie', 'en-my',
-    'en-nz', 'en-ph', 'en-sg', 'en-us', 'en-za', 'es-es', 'es-mx', 'es-us',
-    'et-ee', 'eu-es', 'fa-ir', 'fi-fi', 'fil-ph', 'fr-be', 'fr-ca', 'fr-ch',
-    'fr-fr', 'fr-lu', 'fuc-latn-sn', 'ga-ie', 'gd-gb', 'gl-es', 'gu-in',
-    'guc-ve', 'ha-latn-ng', 'he-il', 'hi-in', 'hr-hr', 'hu-hu', 'hy-am',
-    'id-id', 'ig-ng', 'is-is', 'it-ch', 'it-it', 'iu-latn-ca', 'ja-jp',
-    'ka-ge', 'kk-kz', 'km-kh', 'kn-in', 'ko-kr', 'kok-in', 'ku-arab-iq',
-    'ky-kg', 'lb-lu', 'lo-la', 'lt-lt', 'lv-lv', 'mi-nz', 'mk-mk', 'ml-in',
-    'mn-mn', 'mr-in', 'ms-bn', 'ms-my', 'mt-mt', 'nb-no', 'ne-np', 'nl-be',
-    'nl-nl', 'nn-no', 'nso-za', 'or-in', 'pa-arab-pk', 'pa-in', 'pl-pl',
-    'prs-af', 'ps-af', 'pt-br', 'pt-pt', 'qut-gt', 'quz-pe', 'rm-ch', 'ro-ro',
-    'ru-ru', 'rw-rw', 'sd-arab-pk', 'si-lk', 'sk-sk', 'sl-si', 'sp-xl',
-    'sq-al', 'sr-cyrl-ba', 'sr-cyrl-rs', 'sr-latn-rs', 'sv-se', 'sw-ke',
-    'ta-in', 'te-in', 'tg-cyrl-tj', 'th-th', 'ti-et', 'tk-tm', 'tl-ph',
-    'tn-za', 'tr-tr', 'tt-ru', 'ug-cn', 'uk-ua', 'ur-pk', 'uz-latn-uz',
-    'vi-vn', 'wo-sn', 'xh-za', 'yo-ng', 'zh-cn', 'zh-hk', 'zh-tw', 'zu-za',
-]
-
-# Contributors to exclude from Top Contributors list
-EXCLUDE = os.environ.get('EXCLUDE', '').split(',')
+ALLOWED_ATTRIBUTES = {
+    'a': ['href', 'title', 'target'],
+    'abbr': ['title'],
+    'acronym': ['title'],
+}
 
 SYNC_TASK_TIMEOUT = 60 * 60 * 1  # 1 hour
 
@@ -759,13 +740,15 @@ CELERY_SEND_EVENTS = False  # We aren't yet monitoring events
 # some of javascript files (e.g. pontoon.js)
 # require Access-Control-Allow-Origin header to be set as '*'.
 CORS_ORIGIN_ALLOW_ALL = True
-CORS_URLS_REGEX = r'^/pontoon\.js$'
+CORS_URLS_REGEX = r'^/(pontoon\.js|graphql/?)$'
 
 SOCIALACCOUNT_ENABLED = True
 SOCIALACCOUNT_ADAPTER = 'pontoon.base.adapter.PontoonSocialAdapter'
 
+
 def account_username(user):
     return user.name_or_email
+
 
 ACCOUNT_AUTHENTICATED_METHOD = 'email'
 ACCOUNT_EMAIL_REQUIRED = True
@@ -799,3 +782,6 @@ else:
 # Attach extra arguments passed to notify.send(...) to the .data attribute
 # of the Notification object.
 NOTIFICATIONS_USE_JSONFIELD = True
+
+# Maximum number of read notifications to display in the notifications menu
+NOTIFICATIONS_MAX_COUNT = 7

@@ -11,6 +11,7 @@
         <th class="latest-activity">Latest Activity<i class="fa"></i></th>
         <th class="progress">Progress<i class="fa"></i></th>
         {% if request %}
+          <th class="all-strings">Number of Strings<i class="fa"></i></th>
           <th class="check">Request<i class="fa"></i></th>
         {% endif %}
       </tr>
@@ -44,6 +45,13 @@
       {% endif %}
     </td>
     {% if request %}
+      <td class="all-strings">
+        {% if project.total_strings %}
+          <span>{{ project.avg_string_count|intcomma }}</span>
+        {% else %}
+          <span class="not">Not synced yet</span>
+        {% endif %}
+      </td>
       <td class="check fa fa-fw"></td>
     {% endif %}
   </tr>
@@ -53,6 +61,9 @@
     </tbody>
   </table>
   {% if request %}
+    <div id="request-projects-note">
+      <p>The requested projects won’t be enabled automatically: an email will be sent to Pontoon admins and team managers to evaluate the request. We’ll try to respond as soon as possible. Please make sure to get in touch with the <a href="{{ url('pontoon.teams.info', locale.code) }}">localization team</a> if you are a new contributor.</p>
+    </div>
     <button id="request-projects">Request new projects</button>
   {% endif %}
 {% endmacro %}

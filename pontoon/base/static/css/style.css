@@ -251,21 +251,6 @@ button {  width: auto; overflow: visible; }
   color: #FED271;
 }
 
-.untranslated .status.fa:before {
-  color: #AAAAAA;
-  content: "";
-}
-
-.has-suggestions .status.fa:before {
-  color: #AAAAAA;
-  content: "";
-}
-
-.unchanged .status.fa:before {
-  color: #AAAAAA;
-  content: "";
-}
-
 /* Reset HTML5 Search Input in Webkit */
 input[type=search] {
   -webkit-appearance:none;
@@ -556,6 +541,10 @@ tfoot td a {
   width: 200px;
 }
 
+#settings .menu {
+  width: 185px;
+}
+
 #go {
   width: auto;
 }
@@ -668,14 +657,6 @@ tfoot td a {
 
 .locale.select .new ~ input[type="search"] {
   padding-right: 50px;
-}
-
-.locale.select .menu ul li span.language {
-  width: 140px;
-}
-
-.locale.select .menu ul li span.code {
-  width: 80px;
 }
 
 .select .menu ul li {
@@ -1032,6 +1013,10 @@ header .right .select .menu {
 .notifications .menu ul.notification-list li.notification-item {
   cursor: default;
   padding: 0;
+}
+
+.notifications .menu ul.notification-list li.notification-item[data-unread="true"] {
+  background: #3F4752;
 }
 
 .notifications .menu li.notification-item span {
@@ -1403,6 +1388,7 @@ body > form,
   padding-right: 3px;
 }
 
+#helpers > section.machinery ul li > header .sources li[data-source='Caighdean']:before,
 #helpers > section.machinery ul li > header .sources li[data-source='Machine Translation']:before {
   content: "";
   padding-right: 0;

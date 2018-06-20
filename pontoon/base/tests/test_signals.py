@@ -1,32 +1,27 @@
-from django_nose.tools import assert_false
-
-from pontoon.base.models import ProjectLocale
-from pontoon.base.tests import (
-    ProjectFactory,
-    LocaleFactory,
-    TestCase,
-    TranslationFactory,
-)
+import pytest
 
 
-class SignalTests(TestCase):
-    def test_project_locale_modified(self):
-        """
-        If ProjectLocale is modified (like setting the
-        latest_translation), has_changed should not be modified.
-        """
-        locale = LocaleFactory.create()
-        project = ProjectFactory.create(locales=[locale])
-        project.has_changed = False
-        project.save()
+@pytest.mark.django_db
+def test_signal_base_project_locale_modified(project_locale_a, translation_a):
+    """
+    If ProjectLocale is modified (like setting the
+    latest_translation), has_changed should not be modified.
+    """
+    project_locale_a.project.has_changed = False
+    project_locale_a.project.save()
+    project_locale_a.project.refresh_from_db()
 
-        project.refresh_from_db()
-        assert_false(project.has_changed)
+    assert not project_locale_a.project.has_changed
 
-        project_locale = ProjectLocale.objects.get(project=project, locale=locale)
-        project_locale.latest_translation = TranslationFactory.create(
-            entity__resource__project=project, locale=locale)
-        project_locale.save()
+    project_locale_a.latest_translation = None
+    project_locale_a.project.save()
+    project_locale_a.project.refresh_from_db()
 
-        project.refresh_from_db()
-        assert_false(project.has_changed)
+    assert not project_locale_a.project.has_changed
+    assert project_locale_a.latest_translation is None
+
+    project_locale_a.latest_translation = translation_a
+    project_locale_a.save()
+    project_locale_a.project.refresh_from_db()
+
+    assert not project_locale_a.project.has_changed

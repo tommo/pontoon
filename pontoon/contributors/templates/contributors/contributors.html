@@ -34,7 +34,7 @@
           {{ HeadingInfo.details_item(
             title='Role',
             class='role',
-            value=top_contributor.role())
+            value=top_contributor.user_role)
           }}
           {{ HeadingInfo.details_item(
             title='Active since',
@@ -44,7 +44,7 @@
           {{ HeadingInfo.details_item(
             title='Latest activity',
             class='latest-activity',
-            value=top_contributor.contributed_translations[0].date|naturaltime)
+            value=top_contributor.contributed_translations.latest('date').date|naturaltime)
           }}
         </ul>
 

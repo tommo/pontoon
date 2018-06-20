@@ -62,7 +62,12 @@ class SyncLog(BaseLog):
 
         # total_strings missmatch between TranslatedResource & Resource
         translated_resources = []
-        for t in TranslatedResource.objects.exclude(total_strings=F('resource__total_strings')).select_related('resource'):
+        tr_source = (
+            TranslatedResource.objects
+            .exclude(total_strings=F('resource__total_strings'))
+            .select_related('resource')
+        )
+        for t in tr_source:
             t.total_strings = t.resource.total_strings
             translated_resources.append(t)
 
@@ -70,17 +75,28 @@ class SyncLog(BaseLog):
 
         # total_strings missmatch in ProjectLocales within the same project
         for p in Project.objects.available():
-            if ProjectLocale.objects.filter(project=p).values("total_strings").distinct().count() > 1:
+            count = (
+                ProjectLocale.objects
+                .filter(project=p)
+                .values("total_strings")
+                .distinct().count()
+            )
+            if count > 1:
                 for pl in ProjectLocale.objects.filter(project=p):
                     pl.aggregate_stats()
 
         # translated + suggested + fuzzy > total in TranslatedResource
         for t in (
             TranslatedResource.objects
-                .filter(resource__project__disabled=False)
-                .annotate(total=Sum(F('approved_strings') + F('translated_strings') + F('fuzzy_strings')))
-                .filter(total__gt=F('total_strings'))
-            ):
+            .filter(
+                resource__project__disabled=False,
+                resource__project__sync_disabled=False,
+            )
+            .annotate(
+                total=Sum(F('approved_strings') + F('translated_strings') + F('fuzzy_strings'))
+            )
+            .filter(total__gt=F('total_strings'))
+        ):
             t.calculate_stats()
 
         log.info("Sync complete.")
@@ -100,9 +116,7 @@ class ProjectSyncLog(BaseLog):
         if self.skipped:
             return self.skipped_end_time
         elif self.finished:
-            aggregate = (self.repository_sync_logs
-                            .all()
-                            .aggregate(Max('end_time')))
+            aggregate = self.repository_sync_logs.all().aggregate(Max('end_time'))
             return aggregate['end_time__max']
         else:
             return None

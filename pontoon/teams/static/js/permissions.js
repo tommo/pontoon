@@ -1,28 +1,31 @@
 $(function() {
   var container = $('#main .container');
 
-  function inputHidden(name, value) {
-    return $('<input type="hidden" name="' + name + '" value="' + value + '">');
+  function inputHidden(name, value, cssClass) {
+    return $('<input class="' + (cssClass || '') + '" type="hidden" name="' + name + '" value="' + value + '">');
   }
 
   container.on('click', '#permissions-form .save', function(e) {
     e.preventDefault();
     var $form = $('#permissions-form');
 
+    // Remove stale permissions items (bug 1416890)
+    $('input.permissions-form-item').remove();
+
     // Before submitting the form, update translators and managers
     $.each(['translators', 'managers'], function(i, value) {
       var data = $form.find('.user.' + value + ' li');
-      data.each(function(index) {
+      data.each(function() {
 
         var itemId = $(this).data('id');
 
         if ($(this).parents('.general').length > 0) {
-          $form.append(inputHidden('general-' + value, itemId));
+          $form.append(inputHidden('general-' + value, itemId, 'permissions-form-item'));
 
         } else {
           // We have to retrieve an index of parent project locale form
           var localeProjectIndex = $(this).parents('.project-locale').data('index');
-          $form.append(inputHidden('project-locale-' + localeProjectIndex + '-translators', itemId));
+          $form.append(inputHidden('project-locale-' + localeProjectIndex + '-translators', itemId, 'permissions-form-item'));
         }
       });
     });
@@ -31,7 +34,7 @@ $(function() {
       url: $('#permissions-form').prop('action'),
       type: $('#permissions-form').prop('method'),
       data: $('#permissions-form').serialize(),
-      success: function(data) {
+      success: function() {
         Pontoon.endLoader('Permissions saved.');
       },
       error: function() {
@@ -58,7 +61,7 @@ $(function() {
 
   // While in contributors tab, search contributors only
   // Has to be attached to body, like the input.search event in main.js
-  $('body').on('input.search', '.user.available .menu input[type=search]', function(e) {
+  $('body').on('input.search', '.user.available .menu input[type=search]', function() {
     var available = $(this).parents('.user.available');
 
     if (available.find('label a.contributors').is('.active')) {
@@ -82,7 +85,7 @@ $(function() {
     .on('mousemove', '.general .user.select.translators li', function (e) { setArrow($(this), e); });
 
   // Select users
-  container.on('click.pontoon', '.user.select li', function (e) {
+  container.on('click.pontoon', '.user.select li', function () {
     var $wrapper = $(this).parents('.user.select').parent(),
         target = $wrapper.find('.select.translators');
 
@@ -101,12 +104,12 @@ $(function() {
   });
 
   // Focus project selector search field
-  container.on('click', '#project-selector .selector', function(e) {
+  container.on('click', '#project-selector .selector', function() {
     $('#project-selector .search-wrapper input').focus();
   });
 
   // Add project
-  container.on('click', '#project-selector .menu li', function(e) {
+  container.on('click', '#project-selector .menu li', function() {
     var slug = $(this).data('slug'),
         $permsForm = $(".project-locale[data-slug='" + slug + "']");
 

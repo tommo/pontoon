@@ -35,14 +35,36 @@ class CommandTests(TestCase):
 
         self.command.handle(*args, **kwargs)
 
-    def test_disabled_projects(self):
-        """Only sync projects that aren't disabled."""
+    def test_syncable_projects_only(self):
+        """
+        Only sync projects that aren't disabled
+        and for which sync isn't disabled.
+        """
         ProjectFactory.create(disabled=True)
-        active_project = ProjectFactory.create(disabled=False)
+        ProjectFactory.create(sync_disabled=True)
+        active_project = ProjectFactory.create(
+            disabled=False,
+            sync_disabled=False,
+        )
 
         self.execute_command()
         self.mock_sync_project.delay.assert_called_with(
             active_project.pk,
+            ANY,
+            locale=None,
+            no_pull=False,
+            no_commit=False,
+            force=False
+        )
+
+    def test_non_repository_projects(self):
+        """Only sync projects with data_source=repository."""
+        ProjectFactory.create(data_source='database')
+        repo_project = ProjectFactory.create(data_source='repository')
+
+        self.execute_command()
+        self.mock_sync_project.delay.assert_called_with(
+            repo_project.pk,
             ANY,
             locale=None,
             no_pull=False,
@@ -92,7 +114,10 @@ class CommandTests(TestCase):
             force=False
         )
 
-        assert_equal(self.command.stderr.getvalue(), 'Couldn\'t find projects with following slugs: aaa, bbb')
+        assert_equal(
+            self.command.stderr.getvalue(),
+            "Couldn't find projects with following slugs: aaa, bbb"
+        )
 
     def test_cant_commit(self):
         """If project.can_commit is False, do not sync it."""
